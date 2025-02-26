@@ -3,11 +3,11 @@ name = "spectre-rs"
 authors = ["David Bongartz <d.bongartz@gmail.com"]
 description = "A clone of the spectre password manager written in Rust."
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 byteorder = "1.5.0"
-clap = { version = "4.5.20", default-features = false, features = [
+clap = { version = "4.5.31", default-features = false, features = [
     "derive",
     "color",
     "env",
@@ -17,7 +17,7 @@ clap = { version = "4.5.20", default-features = false, features = [
     # "error-context",
     # "cargo",
 ] }
-colored = "2.1.0"
+colored = "3.0.0"
 hmac = { version = "0.12.1", features = ["std"] }
 rpassword = "7.3.1"
 scrypt = { version = "0.11.0", default-features = false, features = ["std"] }
@@ -25,7 +25,7 @@ secstr = "0.5.1"
 sha2 = "0.10.8"
 
 [profile.release]
-opt-level = "z"
+opt-level = 3
 debug = false
 lto = true
 codegen-units = 1
