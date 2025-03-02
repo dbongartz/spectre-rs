@@ -1,0 +1,22 @@
+[package]
+name = "spectre-rs"
+authors = ["David Bongartz <d.bongartz@gmail.com"]
+description = "A clone of the spectre password manager written in Rust."
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+byteorder = "1.5.0"
+hmac = { version = "0.12.1", features = ["std"] }
+scrypt = { version = "0.11.0", default-features = false, features = ["std"] }
+sha2 = "0.10.8"
+secstr = "0.5.1"
+
+# [profile.release]
+# opt-level = 3
+# debug = false
+# lto = true
+# codegen-units = 1
+# panic = "abort"
+# strip = true
+# incremental = false

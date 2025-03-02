@@ -1,8 +1,8 @@
 use std::io::Write;
 
 use clap::{
-    builder::{styling::AnsiColor, Styles},
     Parser,
+    builder::{Styles, styling::AnsiColor},
 };
 use colored::{Color, Colorize};
 use secstr::SecStr;
@@ -25,6 +25,80 @@ const CLAP_STYLE: Styles = Styles::styled()
 // {all-args}{after-help}
 // ";
 
+#[derive(Debug, Clone, Copy, PartialEq, clap::ValueEnum)]
+pub enum PwType {
+    /// 20 characters, symbols
+    #[clap(alias = "x")]
+    Maximum,
+    /// 14 characters, symbols
+    #[clap(alias = "l")]
+    Long,
+    /// 8 characters, symbols
+    #[clap(alias = "m")]
+    Medium,
+    /// 8 characters, no symbols
+    #[clap(alias = "b")]
+    Basic,
+    /// 4 characters, no symbols
+    #[clap(alias = "s")]
+    Short,
+    /// 4 numbers
+    #[clap(alias = "i")]
+    Pin,
+    /// 9 letter name
+    #[clap(alias = "n")]
+    Name,
+    /// 20 letter sentence
+    #[clap(alias = "p")]
+    Phrase,
+    /// 512 bit key
+    #[clap(alias = "K")]
+    Key,
+    /// saved personal password
+    #[clap(alias = "P")]
+    Personal,
+}
+
+impl From<PwType> for spectre_rs::PwType {
+    fn from(pw_type: PwType) -> Self {
+        match pw_type {
+            PwType::Maximum => spectre_rs::PwType::Maximum,
+            PwType::Long => spectre_rs::PwType::Long,
+            PwType::Medium => spectre_rs::PwType::Medium,
+            PwType::Basic => spectre_rs::PwType::Basic,
+            PwType::Short => spectre_rs::PwType::Short,
+            PwType::Pin => spectre_rs::PwType::Pin,
+            PwType::Name => spectre_rs::PwType::Name,
+            PwType::Phrase => spectre_rs::PwType::Phrase,
+            PwType::Key => spectre_rs::PwType::Key,
+            PwType::Personal => spectre_rs::PwType::Personal,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, clap::ValueEnum)]
+pub enum Scope {
+    /// An authentication token such as a password.
+    #[clap(name = "auth", alias = "a")]
+    Authentication,
+    /// An identification token such as a username.
+    #[clap(name = "ident", alias = "i")]
+    Identification,
+    /// A recovery token such as a security answer.
+    #[clap(name = "rec", alias = "r")]
+    Recovery,
+}
+
+impl From<Scope> for spectre_rs::Scope {
+    fn from(scope: Scope) -> Self {
+        match scope {
+            Scope::Authentication => spectre_rs::Scope::Authentication,
+            Scope::Identification => spectre_rs::Scope::Identification,
+            Scope::Recovery => spectre_rs::Scope::Recovery,
+        }
+    }
+}
+
 #[derive(Debug, Parser)]
 #[clap(version, about, author, long_about = None, styles = CLAP_STYLE)]
 struct Args {
@@ -37,15 +111,15 @@ struct Args {
     secret: Option<SecStr>,
 
     /// Specify the type of password to generate.
-    #[clap(short = 't', long, value_enum, default_value_t=spectre_rs::PwType::Long)]
-    pw_type: spectre_rs::PwType,
+    #[clap(short = 't', long, value_enum, default_value_t=PwType::Long)]
+    pw_type: PwType,
 
     /// The value of the counter
     #[clap(short = 'c', long, default_value_t = 1)]
     counter: u32,
 
-    #[clap(short = 'p', long, value_enum, default_value_t = spectre_rs::Scope::Authentication)]
-    purpose: spectre_rs::Scope,
+    #[clap(short = 'p', long, value_enum, default_value_t = Scope::Authentication)]
+    purpose: Scope,
 
     /// The site name to use.
     site_name: Option<String>,
@@ -96,9 +170,9 @@ fn main() {
 
     // -------- Key Derivation --------
 
-    let user_key = gen_user_key(&user_name, &user_secret, args.purpose);
-    let site_key = gen_site_seed(&site_name, &user_key, args.purpose, counter);
-    let password = gen_site_password(&site_key, args.pw_type);
+    let user_key = gen_user_key(&user_name, &user_secret, args.purpose.into());
+    let site_key = gen_site_seed(&site_name, &user_key, args.purpose.into(), counter);
+    let password = gen_site_password(&site_key, args.pw_type.into());
     let identicon = Identicon::new(&user_secret, &user_name);
 
     // ------- Print Identicon and Password --------

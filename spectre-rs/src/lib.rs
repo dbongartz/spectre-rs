@@ -5,12 +5,6 @@ use secstr::SecStr;
 
 pub type HmacSha256 = hmac::Hmac<sha2::Sha256>;
 
-const N: u32 = 32768;
-const LOG2_N: u8 = u32::ilog2(N) as u8;
-const R: u32 = 8;
-const P: u32 = 2;
-const KEY_LEN: usize = 64;
-
 pub fn gen_user_key(user_name: &str, user_secret: &SecStr, scope: Scope) -> SecStr {
     let seed = {
         let mut seed = Vec::new();
@@ -21,6 +15,12 @@ pub fn gen_user_key(user_name: &str, user_secret: &SecStr, scope: Scope) -> SecS
     };
 
     let mut user_key = SecStr::new(vec![0u8; 64]);
+
+    const N: u32 = 32768;
+    const LOG2_N: u8 = u32::ilog2(N) as u8;
+    const R: u32 = 8;
+    const P: u32 = 2;
+    const KEY_LEN: usize = 64;
 
     scrypt(
         user_secret.unsecure(),
@@ -69,50 +69,37 @@ pub fn gen_site_password(site_seed: &SecStr, pw_type: PwType) -> SecStr {
     )
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, clap::ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PwType {
     /// 20 characters, symbols
-    #[clap(alias = "x")]
     Maximum,
     /// 14 characters, symbols
-    #[clap(alias = "l")]
     Long,
     /// 8 characters, symbols
-    #[clap(alias = "m")]
     Medium,
     /// 8 characters, no symbols
-    #[clap(alias = "b")]
     Basic,
     /// 4 characters, no symbols
-    #[clap(alias = "s")]
     Short,
     /// 4 numbers
-    #[clap(alias = "i")]
     Pin,
     /// 9 letter name
-    #[clap(alias = "n")]
     Name,
     /// 20 letter sentence
-    #[clap(alias = "p")]
     Phrase,
     /// 512 bit key
-    #[clap(alias = "K")]
     Key,
     /// saved personal password
-    #[clap(alias = "P")]
     Personal,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, clap::ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Scope {
     /// An authentication token such as a password.
-    #[clap(name = "auth", alias = "a")]
     Authentication,
     /// An identification token such as a username.
-    #[clap(name = "ident", alias = "i")]
     Identification,
     /// A recovery token such as a security answer.
-    #[clap(name = "rec", alias = "r")]
     Recovery,
 }
 
