@@ -69,6 +69,20 @@ pub fn gen_site_password(site_seed: &SecStr, pw_type: PwType) -> SecStr {
     )
 }
 
+/// Convenience function to generate a site password.
+pub fn get_site_password(
+    user_name: &str,
+    user_secret: &SecStr,
+    site_name: &str,
+    counter: u32,
+    pw_type: PwType,
+    purpose: Scope,
+) -> SecStr {
+    let user_key = gen_user_key(user_name, user_secret, purpose);
+    let site_seed = gen_site_seed(site_name, &user_key, purpose, counter);
+    gen_site_password(&site_seed, pw_type)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PwType {
     /// 20 characters, symbols
@@ -192,7 +206,10 @@ mod templates {
 }
 
 pub mod identicon {
+    use std::fmt::Display;
+
     use crate::HmacSha256;
+    use colored::{Color, Colorize};
     use hmac::Mac;
     use secstr::SecStr;
 
@@ -208,16 +225,17 @@ pub mod identicon {
 
     #[derive(Debug)]
     pub struct Identicon {
-        pub left_arm: &'static str,
-        pub right_arm: &'static str,
-        pub body: &'static str,
-        pub accessory: &'static str,
-        pub color: u8,
+        left_arm: &'static str,
+        right_arm: &'static str,
+        body: &'static str,
+        accessory: &'static str,
+        // Must be <= 7
+        color: u8,
     }
 
     impl Identicon {
-        pub fn new(master_pass: &SecStr, name: &str) -> Self {
-            let seed = HmacSha256::new_from_slice(master_pass.unsecure())
+        pub fn from(user_secret: &SecStr, name: &str) -> Self {
+            let seed = HmacSha256::new_from_slice(user_secret.unsecure())
                 .unwrap()
                 .chain_update(name.as_bytes())
                 .finalize()
@@ -230,6 +248,35 @@ pub mod identicon {
                 accessory: IDENTICON_ACCESSORIES[seed[3] as usize % IDENTICON_ACCESSORIES.len()],
                 color: seed[4] % 7 + 1,
             }
+        }
+
+        pub fn get_ansi_color(&self) -> Color {
+            match self.color {
+                0 => Color::Black,
+                1 => Color::Red,
+                2 => Color::Green,
+                3 => Color::Yellow,
+                4 => Color::Blue,
+                5 => Color::Magenta,
+                6 => Color::Cyan,
+                7 => Color::White,
+                // <= 7 guaranteed by constructor
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    impl Display for Identicon {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            let color = self.get_ansi_color();
+            write!(
+                f,
+                "{}{}{}{}",
+                self.left_arm.color(color),
+                self.body.color(color),
+                self.right_arm.color(color),
+                self.accessory.color(color)
+            )
         }
     }
 }

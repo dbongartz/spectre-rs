@@ -4,9 +4,8 @@ use clap::{
     Parser,
     builder::{Styles, styling::AnsiColor},
 };
-use colored::{Color, Colorize};
 use secstr::SecStr;
-use spectre_rs::{gen_site_password, gen_site_seed, gen_user_key, identicon::Identicon};
+use spectre_rs::{get_site_password, identicon::Identicon};
 
 const CLAP_STYLE: Styles = Styles::styled()
     .header(AnsiColor::Yellow.on_default())
@@ -170,41 +169,22 @@ fn main() {
 
     // -------- Key Derivation --------
 
-    let user_key = gen_user_key(&user_name, &user_secret, args.purpose.into());
-    let site_key = gen_site_seed(&site_name, &user_key, args.purpose.into(), counter);
-    let password = gen_site_password(&site_key, args.pw_type.into());
-    let identicon = Identicon::new(&user_secret, &user_name);
+    let site_password = get_site_password(
+        &user_name,
+        &user_secret,
+        &site_name,
+        counter,
+        args.pw_type.into(),
+        args.purpose.into(),
+    );
+
+    let identicon = Identicon::from(&user_secret, &user_name);
 
     // ------- Print Identicon and Password --------
 
     println!(
-        "[ {}{}{}{} ]: {}",
-        identicon
-            .left_arm
-            .color(get_ansi_color_from_number(identicon.color)),
-        identicon
-            .body
-            .color(get_ansi_color_from_number(identicon.color)),
-        identicon
-            .right_arm
-            .color(get_ansi_color_from_number(identicon.color)),
-        identicon
-            .accessory
-            .color(get_ansi_color_from_number(identicon.color)),
-        std::str::from_utf8(password.unsecure()).unwrap()
+        "[ {} ]: {}",
+        identicon,
+        std::str::from_utf8(site_password.unsecure()).unwrap()
     );
-}
-
-const fn get_ansi_color_from_number(number: u8) -> Color {
-    match number {
-        0 => Color::Black,
-        1 => Color::Red,
-        2 => Color::Green,
-        3 => Color::Yellow,
-        4 => Color::Blue,
-        5 => Color::Magenta,
-        6 => Color::Cyan,
-        7 => Color::White,
-        _ => Color::White,
-    }
 }
