@@ -182,9 +182,12 @@ fn main() {
 
     // ------- Print Identicon and Password --------
 
-    println!(
-        "[ {} ]: {}",
-        identicon,
-        std::str::from_utf8(site_password.unsecure()).unwrap()
-    );
+    let pw_str = std::str::from_utf8(site_password.unsecure()).unwrap();
+
+    use std::io::IsTerminal;
+    if !std::io::stdout().is_terminal() {
+        println!("{pw_str}");
+    } else {
+        println!("[ {identicon} ]: {pw_str}");
+    }
 }

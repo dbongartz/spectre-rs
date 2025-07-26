@@ -1,13 +1,13 @@
 [package]
 name = "spectre-rs-cli"
-version = "0.1.0"
+version = "0.2.0"
 description = "A clone of the spectre password manager cli written in Rust."
 authors = ["David Bongartz <d.bongartz@gmail.com"]
 edition = "2024"
 
 
 [dependencies]
-clap = { version = "4.5.31", default-features = false, features = [
+clap = { version = "4.5.41", default-features = false, features = [
     "derive",
     "color",
     "env",
@@ -17,6 +17,6 @@ clap = { version = "4.5.31", default-features = false, features = [
     # "error-context",
     # "cargo",
 ] }
-rpassword = "7.3.1"
+rpassword = "7.4.0"
 secstr = "0.5.1"
 spectre-rs = { path = "../spectre-rs" }
