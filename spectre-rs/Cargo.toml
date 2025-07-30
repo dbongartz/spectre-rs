@@ -1,8 +1,8 @@
 [package]
 name = "spectre-rs"
-authors = ["David Bongartz <d.bongartz@gmail.com"]
-description = "A clone of the spectre password manager written in Rust."
 version = "0.1.0"
+authors = ["David Bongartz <d.bongartz@gmail.com"]
+description = "A clone of the spectre password manager library written in Rust."
 edition = "2024"
 
 [dependencies]

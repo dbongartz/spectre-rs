@@ -1,6 +1,28 @@
 [package]
 name = "spectre-rs-ui"
 version = "0.1.0"
+description = "Spectre password manager UI written in Rust."
+authors = ["David Bongartz <d.bongartz@gmail.com"]
 edition = "2024"
 
 [dependencies]
+spectre-rs = { path = "../spectre-rs" }
+
+egui = "0.32.0"
+eframe = { version = "0.32.0", default-features = false, features = [
+    "default_fonts",
+    "glow",
+    "wayland",
+] }
+
+log = "0.4.27"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+env_logger = "0.11.8"
+
+[profile.release]
+opt-level = 2 # fast and small wasm
+
+# Optimize all dependencies even in debug builds:
+[profile.dev.package."*"]
+opt-level = 2
