@@ -225,10 +225,10 @@ pub mod identicon {
 
     #[derive(Debug)]
     pub struct Identicon {
-        left_arm: &'static str,
-        right_arm: &'static str,
-        body: &'static str,
-        accessory: &'static str,
+        pub left_arm: &'static str,
+        pub right_arm: &'static str,
+        pub body: &'static str,
+        pub accessory: &'static str,
         // Must be <= 7
         color: u8,
     }
