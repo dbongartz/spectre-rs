@@ -8,16 +8,14 @@ edition = "2024"
 [dependencies]
 spectre-rs = { path = "../spectre-rs" }
 
-egui = "0.32.0"
-eframe = { version = "0.32.0", default-features = false, features = [
+egui = "0.33.0"
+eframe = { version = "0.33.0", default-features = false, features = [
     "default_fonts",
-    "glow",
+    "wgpu",
     "wayland",
-] }
-
-log = "0.4.27"
-secstr = "0.5.1"
-colored = "3.0.0"
-
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-env_logger = "0.11.8"
+]}
+log = "0.4"
+env_logger = "0.11"
+secstr = "0.5"
+colored = "3.0"
+wgpu = { version = "27.0", default-features = false, features = ["parking_lot", "std", "vulkan"] }

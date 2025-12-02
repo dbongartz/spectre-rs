@@ -1,7 +1,13 @@
-use egui::{Color32, Layout};
+use std::{
+    sync::{Arc, Condvar, Mutex},
+    thread::sleep,
+    time::Duration,
+};
+
+use egui::{Color32, RichText};
+use log::info;
 use secstr::SecStr;
 
-#[cfg(not(target_arch = "wasm32"))]
 fn main() -> eframe::Result {
     env_logger::init();
 
@@ -22,13 +28,45 @@ const APP_TITLE: &str = "Spectre Password Manager";
 
 #[derive(Debug)]
 struct App {
+    shared_input: Arc<Mutex<Input>>,
+    shared_output: Arc<Mutex<Output>>,
+    signal: Arc<(Mutex<u8>, Condvar)>,
+}
+
+#[derive(Debug, Clone)]
+struct Input {
     user: String,
     user_secret: String,
-    sitename: String,
-    identicon: egui::RichText,
-    color: egui::Color32,
-    site_passwd: String,
     pwtype: spectre_rs::PwType,
+    sitename: String,
+}
+
+impl Input {
+    fn new() -> Self {
+        Self {
+            user: String::new(),
+            user_secret: String::new(),
+            sitename: String::new(),
+            pwtype: spectre_rs::PwType::Medium,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct Output {
+    color: egui::Color32,
+    identicon: egui::RichText,
+    site_passwd: String,
+}
+
+impl Output {
+    fn new() -> Self {
+        Self {
+            color: Color32::WHITE,
+            site_passwd: String::new(),
+            identicon: egui::RichText::new(""),
+        }
+    }
 }
 
 impl App {
@@ -44,14 +82,116 @@ impl App {
             }],
         ));
 
+        let shared_input = Arc::new(Mutex::new(Input::new()));
+        let shared_output = Arc::new(Mutex::new(Output::new()));
+
+        let signal = Arc::new((Mutex::new(0), Condvar::new()));
+
+        std::thread::spawn({
+            let shared_input = shared_input.clone();
+            let shared_output = shared_output.clone();
+            let signal = signal.clone();
+            move || {
+                loop {
+                    {
+                        let mut new_input = signal
+                            .1
+                            .wait_while(signal.0.lock().unwrap(), |&mut new_input| {
+                                new_input & 0b01 != 0b01
+                            })
+                            .unwrap();
+                        *new_input &= 0b10;
+                    }
+                    let input = shared_input.lock().unwrap().clone();
+
+                    let ready_for_identicon =
+                        !(input.user.is_empty() || input.user_secret.is_empty());
+                    let ready_for_pw = ready_for_identicon && !input.sitename.is_empty();
+
+                    if ready_for_pw {
+                        if ready_for_pw {
+                            let sec_pw = SecStr::from(input.user_secret);
+                            let site_passwd = spectre_rs::get_site_password(
+                                &input.user,
+                                &sec_pw,
+                                &input.sitename,
+                                1,
+                                input.pwtype,
+                                spectre_rs::Scope::Authentication,
+                            );
+
+                            let site_passwd = std::str::from_utf8(site_passwd.unsecure())
+                                .unwrap()
+                                .to_string();
+                            shared_output.lock().unwrap().site_passwd = site_passwd;
+                        } else {
+                            shared_output.lock().unwrap().site_passwd.clear();
+                        };
+                    }
+                }
+            }
+        });
+
+        std::thread::spawn({
+            let shared_input = shared_input.clone();
+            let shared_output = shared_output.clone();
+            let signal = signal.clone();
+            move || {
+                loop {
+                    {
+                        let mut new_input = signal
+                            .1
+                            .wait_while(signal.0.lock().unwrap(), |&mut new_input| {
+                                new_input & 0b10 != 0b10
+                            })
+                            .unwrap();
+                        *new_input &= 0b01;
+                    }
+                    let input = shared_input.lock().unwrap().clone();
+
+                    let ready_for_identicon =
+                        !(input.user.is_empty() || input.user_secret.is_empty());
+
+                    if ready_for_identicon {
+                        let sec_pw = SecStr::from(input.user_secret.to_owned());
+
+                        let identicon =
+                            spectre_rs::identicon::Identicon::from(&sec_pw, &input.user);
+
+                        let color = if let colored::Color::TrueColor { r, g, b } =
+                            into_truecolor(identicon.get_ansi_color())
+                        {
+                            Some(Color32::from_rgb(r, g, b))
+                        } else {
+                            None
+                        }
+                        .unwrap();
+
+                        let identicon = egui::RichText::new(std::format!(
+                            "{}{}{}{}",
+                            identicon.left_arm,
+                            identicon.body,
+                            identicon.right_arm,
+                            identicon.accessory
+                        ))
+                        .size(20.0)
+                        .color(color);
+
+                        let mut lock = shared_output.lock().unwrap();
+                        lock.color = color;
+                        lock.identicon = identicon;
+                    } else {
+                        let mut lock = shared_output.lock().unwrap();
+                        lock.identicon = RichText::new("");
+                    };
+                }
+            }
+        });
+
         Self {
-            user: String::new(),
-            user_secret: String::new(),
-            sitename: String::new(),
-            identicon: egui::RichText::new(""),
-            color: Color32::WHITE,
-            site_passwd: String::new(),
-            pwtype: spectre_rs::PwType::Medium,
+            shared_input,
+            shared_output,
+            signal,
         }
     }
 }
@@ -62,16 +202,20 @@ impl eframe::App for App {
             ui.vertical_centered(|ui| {
                 ui.add(egui::Label::new(egui::RichText::new(APP_TITLE).heading()));
 
-                let user = ui.add(egui::TextEdit::singleline(&mut self.user).hint_text("Username"));
-                let pw = ui.add(
-                    egui::TextEdit::singleline(&mut self.user_secret)
+                let mut input = { self.shared_input.lock().unwrap().clone() };
+                let output = { self.shared_output.lock().unwrap().clone() };
+
+                let username =
+                    ui.add(egui::TextEdit::singleline(&mut input.user).hint_text("Username"));
+                let secret = ui.add(
+                    egui::TextEdit::singleline(&mut input.user_secret)
                         .password(true)
                         .hint_text("Password"),
                 );
 
-                ui.add(egui::Label::new(self.identicon.clone()));
+                ui.add(egui::Label::new(output.identicon.clone()));
 
-                let mut pwtype = self.pwtype;
+                let mut pwtype = input.pwtype;
                 let _cbox = egui::ComboBox::from_label("Type")
                     .selected_text(format!("{pwtype:?}"))
                     .width(100.0)
@@ -83,66 +227,19 @@ impl eframe::App for App {
                     });
 
                 let sitename =
-                    ui.add(egui::TextEdit::singleline(&mut self.sitename).hint_text("Sitename"));
+                    ui.add(egui::TextEdit::singleline(&mut input.sitename).hint_text("Sitename"));
 
-                ui.label(&self.site_passwd);
+                ui.label(&output.site_passwd);
 
-                let pwtype_changed = self.pwtype != pwtype;
-                let inputs_changed =
-                    user.changed() || pw.changed() || sitename.changed() || pwtype_changed;
-                let ready_for_identicon = !(self.user.is_empty() || self.user_secret.is_empty());
-                let ready_for_pw = ready_for_identicon && !self.sitename.is_empty();
-
-                if inputs_changed {
-                    if pwtype_changed {
-                        self.pwtype = pwtype;
-                    }
-
-                    if ready_for_identicon {
-                        let sec_pw = SecStr::from(self.user_secret.to_owned());
-
-                        let identicon = spectre_rs::identicon::Identicon::from(&sec_pw, &self.user);
-
-                        self.color = if let colored::Color::TrueColor { r, g, b } =
-                            into_truecolor(identicon.get_ansi_color())
-                        {
-                            Some(Color32::from_rgb(r, g, b))
-                        } else {
-                            None
-                        }
-                        .unwrap();
-
-                        self.identicon = egui::RichText::new(std::format!(
-                            "{}{}{}{}",
-                            identicon.left_arm,
-                            identicon.body,
-                            identicon.right_arm,
-                            identicon.accessory
-                        ))
-                        .size(20.0)
-                        .color(self.color);
-                    } else {
-                        self.identicon = egui::RichText::new("");
-                    }
-
-                    if ready_for_pw {
-                        self.pwtype = pwtype;
-                        let sec_pw = SecStr::from(self.user_secret.to_owned());
-                        let site_passwd = spectre_rs::get_site_password(
-                            &self.user,
-                            &sec_pw,
-                            &self.sitename,
-                            1,
-                            self.pwtype,
-                            spectre_rs::Scope::Authentication,
-                        );
-
-                        self.site_passwd = std::str::from_utf8(site_passwd.unsecure())
-                            .unwrap()
-                            .to_string();
-                    } else {
-                        self.site_passwd.clear();
-                    }
+                if sitename.changed()
+                    || secret.changed()
+                    || username.changed()
+                    || pwtype != input.pwtype
+                {
+                    *self.signal.0.lock().unwrap() = 0b11;
+                    self.signal.1.notify_all();
+                    input.pwtype = pwtype;
+                    *self.shared_input.lock().unwrap() = input.clone();
                 }
             });
         });
