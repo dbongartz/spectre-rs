@@ -1,12 +1,10 @@
-use std::{
-    sync::{Arc, Condvar, Mutex},
-    thread::sleep,
-    time::Duration,
-};
+use std::sync::{Arc, Condvar, Mutex};
 
 use egui::{Color32, RichText};
-use log::info;
 use secstr::SecStr;
+
+#[global_allocator]
+static GLOBAL_ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 fn main() -> eframe::Result {
     env_logger::init();
@@ -153,7 +151,7 @@ impl App {
                         !(input.user.is_empty() || input.user_secret.is_empty());
 
                     if ready_for_identicon {
-                        let sec_pw = SecStr::from(input.user_secret.to_owned());
+                        let sec_pw = SecStr::from(input.user_secret);
 
                         let identicon =
                             spectre_rs::identicon::Identicon::from(&sec_pw, &input.user);
@@ -197,8 +195,8 @@ impl App {
 }
 
 impl eframe::App for App {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        egui::CentralPanel::default().show(ctx, |ui| {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        egui::CentralPanel::default().show_inside(ui, |ui| {
             ui.vertical_centered(|ui| {
                 ui.add(egui::Label::new(egui::RichText::new(APP_TITLE).heading()));
 
@@ -231,15 +229,20 @@ impl eframe::App for App {
 
                 ui.label(&output.site_passwd);
 
-                if sitename.changed()
-                    || secret.changed()
-                    || username.changed()
-                    || pwtype != input.pwtype
-                {
-                    *self.signal.0.lock().unwrap() = 0b11;
-                    self.signal.1.notify_all();
+                let mut mask = 0b00;
+                if secret.changed() || username.changed() {
+                    mask |= 0b10;
+                }
+                if sitename.changed() || pwtype != input.pwtype {
                     input.pwtype = pwtype;
-                    *self.shared_input.lock().unwrap() = input.clone();
+                    mask |= 0b01;
+                }
+                if mask != 0b00 {
+                    {
+                        *self.shared_input.lock().unwrap() = input.clone();
+                        *self.signal.0.lock().unwrap() = mask;
+                    }
+                    self.signal.1.notify_all();
                 }
             });
         });
@@ -306,5 +309,6 @@ fn into_truecolor(color: colored::Color) -> colored::Color {
             b: 255,
         },
         TrueColor { r, g, b } => TrueColor { r, g, b },
+        AnsiColor(_) => todo!("AnsiColor to rgb not implemented."),
     }
 }
