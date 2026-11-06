@@ -1,4 +1,5 @@
 use std::error::Error;
+use std::io;
 
 use clap::{
     Parser,
@@ -69,7 +70,10 @@ fn run() -> Result<(), Box<dyn Error>> {
 
     let user_secret = match args.secret {
         Some(secret) => secret,
-        None => SecStr::from(rpassword::prompt_password("Enter secret: ")?),
+        None => match read_secret()? {
+            Some(secret) => secret,
+            None => return Ok(()),
+        },
     };
 
     let counter = args.counter;
@@ -105,6 +109,25 @@ fn read_prompt(editor: &mut DefaultEditor, prompt: &str) -> Result<Option<String
     match editor.readline(prompt) {
         Ok(input) => Ok(Some(input.trim().to_string())),
         Err(ReadlineError::Interrupted | ReadlineError::Eof) => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+fn read_secret() -> io::Result<Option<SecStr>> {
+    let config = rpassword::ConfigBuilder::new()
+        .password_feedback_mask('*')
+        .build();
+
+    match rpassword::prompt_password_with_config("Enter secret: ", config) {
+        Ok(secret) => Ok(Some(SecStr::from(secret))),
+        Err(error)
+            if matches!(
+                error.kind(),
+                io::ErrorKind::Interrupted | io::ErrorKind::UnexpectedEof
+            ) =>
+        {
+            Ok(None)
+        }
         Err(error) => Err(error),
     }
 }
