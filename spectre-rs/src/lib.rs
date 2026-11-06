@@ -1,5 +1,5 @@
 use byteorder::{BigEndian, WriteBytesExt};
-use hmac::Mac;
+use hmac::{KeyInit, Mac};
 use scrypt::scrypt;
 use secstr::SecStr;
 
@@ -14,18 +14,17 @@ pub fn gen_user_key(user_name: &str, user_secret: &SecStr, scope: Scope) -> SecS
         SecStr::new(seed)
     };
 
-    let mut user_key = SecStr::new(vec![0u8; 64]);
-
     const N: u32 = 32768;
     const LOG2_N: u8 = u32::ilog2(N) as u8;
     const R: u32 = 8;
     const P: u32 = 2;
     const KEY_LEN: usize = 64;
+    let mut user_key = SecStr::new(vec![0u8; KEY_LEN]);
 
     scrypt(
         user_secret.unsecure(),
         seed.unsecure(),
-        &scrypt::Params::new(LOG2_N, R, P, KEY_LEN).unwrap(),
+        &scrypt::Params::new(LOG2_N, R, P).unwrap(),
         user_key.unsecure_mut(),
     )
     .unwrap();
@@ -207,7 +206,7 @@ pub mod identicon {
 
     use crate::HmacSha256;
     use colored::{Color, Colorize};
-    use hmac::Mac;
+    use hmac::{KeyInit, Mac};
     use secstr::SecStr;
 
     const IDENTICON_LEFT_ARMS: &[&str] = &["╔", "╚", "╰", "═"];
