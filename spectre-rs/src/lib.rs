@@ -150,10 +150,7 @@ impl PwType {
             Self::Basic => templates::RESULT_TYPE_BASIC,
             Self::Short => templates::RESULT_TYPE_SHORT,
             Self::Pin => templates::RESULT_TYPE_PIN,
-            Self::Name => templates::RESULT_TYPE_BASIC,
-            Self::Phrase => templates::RESULT_TYPE_LONG,
-            Self::Key => templates::RESULT_TYPE_LONG,
-            Self::Personal => templates::RESULT_TYPE_LONG,
+            Self::Name | Self::Phrase | Self::Key | Self::Personal => todo!(),
         }
     }
 }

@@ -1,4 +1,5 @@
 use std::io::Write;
+use std::{error::Error, io};
 
 use clap::{
     Parser,
@@ -34,45 +35,35 @@ struct Args {
 }
 
 fn main() {
+    if let Err(error) = run() {
+        eprintln!("Error: {error}");
+        std::process::exit(1);
+    }
+}
+
+fn run() -> Result<(), Box<dyn Error>> {
     // -------- Argument Parsing & TUI --------
 
     let args = Args::parse();
 
-    let user_name = args.user_name.unwrap_or_else(|| {
-        print!("Enter user name: ");
-        std::io::stdout().flush().unwrap();
-        let mut buf = String::new();
-        std::io::stdin().read_line(&mut buf).unwrap();
-        buf.trim().to_string()
-    });
-
-    match u32::try_from(user_name.len()) {
-        Ok(len) => len,
-        Err(_) => {
-            eprintln!("User name too long");
-            std::process::exit(1);
-        }
+    let user_name = match args.user_name {
+        Some(user_name) => user_name,
+        None => read_prompt("Enter user name: ")?,
     };
 
-    let site_name = args.site_name.unwrap_or_else(|| {
-        print!("Enter site name: ");
-        std::io::stdout().flush().unwrap();
-        let mut buf = String::new();
-        std::io::stdin().read_line(&mut buf).unwrap();
-        buf.trim().to_string()
-    });
+    u32::try_from(user_name.len()).map_err(|_| "User name too long")?;
 
-    match u32::try_from(site_name.len()) {
-        Ok(len) => len,
-        Err(_) => {
-            eprintln!("User name too long");
-            std::process::exit(1);
-        }
+    let site_name = match args.site_name {
+        Some(site_name) => site_name,
+        None => read_prompt("Enter site name: ")?,
     };
 
-    let user_secret = args
-        .secret
-        .unwrap_or_else(|| SecStr::from(rpassword::prompt_password("Enter secret: ").unwrap()));
+    u32::try_from(site_name.len()).map_err(|_| "Site name too long")?;
+
+    let user_secret = match args.secret {
+        Some(secret) => secret,
+        None => SecStr::from(rpassword::prompt_password("Enter secret: ")?),
+    };
 
     let counter = args.counter;
 
@@ -91,7 +82,7 @@ fn main() {
 
     // ------- Print Identicon and Password --------
 
-    let pw_str = std::str::from_utf8(site_password.unsecure()).unwrap();
+    let pw_str = std::str::from_utf8(site_password.unsecure())?;
 
     use std::io::IsTerminal;
     if !std::io::stdout().is_terminal() {
@@ -99,6 +90,16 @@ fn main() {
     } else {
         println!("[ {identicon} ]: {pw_str}");
     }
+
+    Ok(())
+}
+
+fn read_prompt(prompt: &str) -> io::Result<String> {
+    print!("{prompt}");
+    io::stdout().flush()?;
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+    Ok(input.trim().to_string())
 }
 
 const CLAP_STYLE: Styles = Styles::styled()
