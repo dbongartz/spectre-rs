@@ -1,10 +1,10 @@
-use std::io::Write;
-use std::{error::Error, io};
+use std::error::Error;
 
 use clap::{
     Parser,
     builder::{Styles, styling::AnsiColor},
 };
+use rustyline::{DefaultEditor, error::ReadlineError};
 use secstr::SecStr;
 use spectre_rs::{get_site_password, identicon::Identicon};
 
@@ -45,17 +45,24 @@ fn run() -> Result<(), Box<dyn Error>> {
     // -------- Argument Parsing & TUI --------
 
     let args = Args::parse();
+    let mut editor = DefaultEditor::new()?;
 
     let user_name = match args.user_name {
         Some(user_name) => user_name,
-        None => read_prompt("Enter user name: ")?,
+        None => match read_prompt(&mut editor, "Enter user name: ")? {
+            Some(user_name) => user_name,
+            None => return Ok(()),
+        },
     };
 
     u32::try_from(user_name.len()).map_err(|_| "User name too long")?;
 
     let site_name = match args.site_name {
         Some(site_name) => site_name,
-        None => read_prompt("Enter site name: ")?,
+        None => match read_prompt(&mut editor, "Enter site name: ")? {
+            Some(site_name) => site_name,
+            None => return Ok(()),
+        },
     };
 
     u32::try_from(site_name.len()).map_err(|_| "Site name too long")?;
@@ -94,12 +101,12 @@ fn run() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn read_prompt(prompt: &str) -> io::Result<String> {
-    print!("{prompt}");
-    io::stdout().flush()?;
-    let mut input = String::new();
-    io::stdin().read_line(&mut input)?;
-    Ok(input.trim().to_string())
+fn read_prompt(editor: &mut DefaultEditor, prompt: &str) -> Result<Option<String>, ReadlineError> {
+    match editor.readline(prompt) {
+        Ok(input) => Ok(Some(input.trim().to_string())),
+        Err(ReadlineError::Interrupted | ReadlineError::Eof) => Ok(None),
+        Err(error) => Err(error),
+    }
 }
 
 const CLAP_STYLE: Styles = Styles::styled()
