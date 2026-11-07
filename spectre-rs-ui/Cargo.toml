@@ -4,6 +4,10 @@ version = "0.1.1"
 edition = "2024"
 description = "Spectre password manager UI written in Rust."
 
+[features]
+# Opt-in UI inspection for local development. Blocked in release builds below.
+dev-inspection = ["dep:egui_inspection"]
+
 [dependencies]
 spectre-rs = { path = "../spectre-rs" }
 
@@ -14,6 +18,7 @@ eframe = { version = "0.37.0", default-features = false, features = [
   "wayland"
 ] }
 egui = "0.37.0"
+egui_inspection = { version = "0.37.0", optional = true, default-features = false, features = ["plugin"] }
 env_logger = "0.11"
 log = "0.4"
 mimalloc = "0.1.52"
