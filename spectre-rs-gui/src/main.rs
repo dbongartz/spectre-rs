@@ -17,6 +17,8 @@ fn main() -> eframe::Result {
 
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
+            .with_app_id("spectre-rs-gui")
+            .with_icon(app_icon())
             .with_inner_size([440.0, 440.0])
             .with_min_inner_size([440.0, 440.0]),
         ..Default::default()
@@ -26,6 +28,11 @@ fn main() -> eframe::Result {
         native_options,
         Box::new(|cc| Ok(Box::new(App::new(cc)))),
     )
+}
+
+fn app_icon() -> egui::IconData {
+    eframe::icon_data::from_png_bytes(include_bytes!("../assets/spectre-rs-gui.png"))
+        .expect("embedded application icon must be a valid PNG")
 }
 
 const APP_TITLE: &str = "Spectre Password Manager";

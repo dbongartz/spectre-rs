@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Spectre Password Manager
+Comment=Generate strong, reproducible passwords
+Exec=spectre-rs-gui
+TryExec=spectre-rs-gui
+Icon=spectre-rs-gui
+Terminal=false
+Categories=Utility;
+StartupNotify=true
