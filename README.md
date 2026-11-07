@@ -2,6 +2,8 @@
 
 A Rust implementation of the Spectre password generator, inspired by the original Master Password algorithm.
 
+<img width="455" height="528" alt="image" src="https://github.com/user-attachments/assets/24430819-feec-44ba-a098-2ca993536d7f" />
+
 This repository is organized as a Cargo workspace with:
 
 - `spectre-rs-core`: core password-generation logic
