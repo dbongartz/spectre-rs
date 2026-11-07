@@ -29,6 +29,10 @@ fn main() -> eframe::Result {
 }
 
 const APP_TITLE: &str = "Spectre Password Manager";
+const LABEL_WIDTH: f32 = 30.0;
+const FIELD_GAP: f32 = 8.0;
+const FIELD_HEIGHT: f32 = 38.0;
+const LABEL_SIZE: f32 = 16.0;
 
 #[derive(Debug)]
 struct App {
@@ -94,39 +98,7 @@ impl App {
         ));
 
         let input = Input::new();
-        let (derive_tx, derive_rx) = mpsc::channel::<DeriveRequest>();
-        let (derived_tx, derived_rx) = mpsc::channel::<DerivedKey>();
-        let egui_ctx = cc.egui_ctx.clone();
-
-        std::thread::spawn({
-            let egui_ctx = egui_ctx.clone();
-            move || {
-                while let Ok(request) = derive_rx.recv() {
-                    // Skip queued intermediate password edits and derive only the latest input.
-                    let mut latest = request;
-                    while let Ok(newer) = derive_rx.try_recv() {
-                        latest = newer;
-                    }
-
-                    let user_key =
-                        if latest.user.is_empty() || latest.user_secret.unsecure().is_empty() {
-                            Ok(None)
-                        } else {
-                            spectre_rs::gen_user_key(
-                                &latest.user,
-                                &latest.user_secret,
-                                spectre_rs::Scope::Authentication,
-                            )
-                            .map(Some)
-                        };
-                    let _ = derived_tx.send(DerivedKey {
-                        revision: latest.revision,
-                        user_key,
-                    });
-                    egui_ctx.request_repaint();
-                }
-            }
-        });
+        let (derive_tx, derived_rx) = start_key_derivation(cc.egui_ctx.clone());
 
         Self {
             input,
@@ -139,6 +111,45 @@ impl App {
             identicon_color: Color32::WHITE,
             copied_at: None,
         }
+    }
+}
+
+fn start_key_derivation(
+    ctx: egui::Context,
+) -> (mpsc::Sender<DeriveRequest>, mpsc::Receiver<DerivedKey>) {
+    let (derive_tx, derive_rx) = mpsc::channel::<DeriveRequest>();
+    let (derived_tx, derived_rx) = mpsc::channel::<DerivedKey>();
+
+    std::thread::spawn(move || {
+        while let Ok(request) = derive_rx.recv() {
+            // Skip queued intermediate password edits and derive only the latest input.
+            let mut latest = request;
+            while let Ok(newer) = derive_rx.try_recv() {
+                latest = newer;
+            }
+
+            let user_key = derive_user_key(&latest);
+            let _ = derived_tx.send(DerivedKey {
+                revision: latest.revision,
+                user_key,
+            });
+            ctx.request_repaint();
+        }
+    });
+
+    (derive_tx, derived_rx)
+}
+
+fn derive_user_key(request: &DeriveRequest) -> Result<Option<SecStr>, spectre_rs::SpectreError> {
+    if request.user.is_empty() || request.user_secret.unsecure().is_empty() {
+        Ok(None)
+    } else {
+        spectre_rs::gen_user_key(
+            &request.user,
+            &request.user_secret,
+            spectre_rs::Scope::Authentication,
+        )
+        .map(Some)
     }
 }
 
@@ -164,246 +175,238 @@ fn attach_inspection(ctx: &egui::Context) {
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        while let Ok(derived) = self.derived_rx.try_recv() {
-            if derived.revision == self.derivation_revision {
-                match derived.user_key {
-                    Ok(user_key) => {
-                        self.user_key = user_key;
-                        if let Err(error) = self.update_site_password() {
-                            log::error!("Failed to generate site password: {error}");
-                            self.site_passwd = None;
-                        }
-                    }
-                    Err(error) => {
-                        log::error!("Failed to derive user key: {error}");
-                        self.user_key = None;
-                        self.site_passwd = None;
-                    }
-                }
-            }
-        }
-
+        self.receive_derived_keys();
         egui::CentralPanel::default().show(ui, |ui| {
             ui.vertical_centered(|ui| {
-                const LABEL_WIDTH: f32 = 30.0;
-                const FIELD_GAP: f32 = 8.0;
-                const FIELD_HEIGHT: f32 = 38.0;
-                const LABEL_SIZE: f32 = 16.0;
-                let field_width =
-                    (ui.available_width() - LABEL_WIDTH - FIELD_GAP).clamp(220.0, 300.0);
-                let form_width = LABEL_WIDTH + FIELD_GAP + field_width;
-                let counter_width = (field_width * 0.29).clamp(72.0, 88.0);
-                let type_width = field_width - counter_width - FIELD_GAP;
-
-                ui.spacing_mut().interact_size.y = FIELD_HEIGHT;
-                ui.add_space(20.0);
-
-                let (username, secret, sitename, pwtype, counter) = ui
-                    .horizontal(|ui| {
-                        ui.add_space(((ui.available_width() - form_width) * 0.5).max(0.0));
-                        ui.vertical(|ui| {
-                            let (username, secret) = egui::Grid::new("credential_fields")
-                                .num_columns(2)
-                                .min_col_width(LABEL_WIDTH)
-                                .spacing([FIELD_GAP, 10.0])
-                                .show(ui, |ui| {
-                                    ui.label(RichText::new("\u{f007}").size(LABEL_SIZE))
-                                        .on_hover_text("User");
-                                    let username = ui.add_sized(
-                                        [field_width, FIELD_HEIGHT],
-                                        egui::TextEdit::singleline(&mut self.input.user)
-                                            .font(egui::FontId::proportional(LABEL_SIZE))
-                                            .align(egui::Align2::LEFT_CENTER)
-                                            .hint_text("User"),
-                                    )
-                                    .on_hover_text(
-                                        "Name used to derive your passwords. Keep it consistent across devices.",
-                                    );
-                                    ui.end_row();
-
-                                    ui.label(RichText::new("\u{f084}").size(LABEL_SIZE))
-                                        .on_hover_text("Secret");
-                                    let secret = ui.add_sized(
-                                        [field_width, FIELD_HEIGHT],
-                                        egui::TextEdit::singleline(&mut self.input.user_secret)
-                                            .font(egui::FontId::proportional(LABEL_SIZE))
-                                            .align(egui::Align2::LEFT_CENTER)
-                                            .password(true)
-                                            .hint_text("Secret"),
-                                    )
-                                    .on_hover_text(
-                                        "Your master secret, used locally to derive your account key.",
-                                    );
-                                    ui.end_row();
-                                    (username, secret)
-                                })
-                                .inner;
-
-                            ui.add_space(12.0);
-
-                            let (sitename, pwtype, counter) = egui::Grid::new("site_fields")
-                                .num_columns(2)
-                                .min_col_width(LABEL_WIDTH)
-                                .spacing([FIELD_GAP, 10.0])
-                                .show(ui, |ui| {
-                                    ui.label(RichText::new("\u{f0ac}").size(LABEL_SIZE))
-                                        .on_hover_text("Site");
-                                    let sitename = ui.add_sized(
-                                        [field_width, FIELD_HEIGHT],
-                                        egui::TextEdit::singleline(&mut self.input.sitename)
-                                            .font(egui::FontId::proportional(LABEL_SIZE))
-                                            .align(egui::Align2::LEFT_CENTER)
-                                            .hint_text("Site"),
-                                    )
-                                    .on_hover_text("The site or service this password is for.");
-                                    ui.end_row();
-
-                                    let mut pwtype = self.input.pwtype;
-                                    let mut counter = self.input.counter;
-                                    ui.label(RichText::new("\u{f1de}").size(LABEL_SIZE))
-                                        .on_hover_text("Password type");
-                                    ui.horizontal(|ui| {
-                                        egui::ComboBox::from_id_salt("password_type")
-                                            .selected_text(
-                                                RichText::new(format!("{pwtype:?}"))
-                                                    .size(LABEL_SIZE),
-                                            )
-                                            .width(type_width)
-                                            .show_ui(ui, |ui| {
-                                                ui.selectable_value(
-                                                    &mut pwtype,
-                                                    spectre_rs::PwType::Medium,
-                                                    RichText::new("Medium").size(LABEL_SIZE),
-                                                )
-                                                .on_hover_text("8 characters with symbols.");
-                                                ui.selectable_value(
-                                                    &mut pwtype,
-                                                    spectre_rs::PwType::Long,
-                                                    RichText::new("Long").size(LABEL_SIZE),
-                                                )
-                                                .on_hover_text("14 characters with symbols.");
-                                                ui.selectable_value(
-                                                    &mut pwtype,
-                                                    spectre_rs::PwType::Basic,
-                                                    RichText::new("Basic").size(LABEL_SIZE),
-                                                )
-                                                .on_hover_text("8 characters without symbols.");
-                                                ui.selectable_value(
-                                                    &mut pwtype,
-                                                    spectre_rs::PwType::Pin,
-                                                    RichText::new("Pin").size(LABEL_SIZE),
-                                                )
-                                                .on_hover_text("4 numeric digits.");
-                                            });
-                                        ui.add_sized(
-                                            [counter_width, FIELD_HEIGHT],
-                                            egui::DragValue::new(&mut counter)
-                                                .range(1..=u32::MAX)
-                                                .speed(0.1),
-                                        )
-                                        .on_hover_text(
-                                            "Password counter. Increase it to create a new password for this site.",
-                                        );
-                                    });
-                                    ui.end_row();
-                                    (sitename, pwtype, counter)
-                                })
-                                .inner;
-                            (username, secret, sitename, pwtype, counter)
-                        })
-                        .inner
-                    })
-                    .inner;
-
-                let credentials_changed = secret.changed() || username.changed();
-                let site_changed = sitename.changed()
-                    || pwtype != self.input.pwtype
-                    || counter != self.input.counter;
-                if pwtype != self.input.pwtype {
-                    self.input.pwtype = pwtype;
-                }
-                self.input.counter = counter;
-                if credentials_changed {
-                    self.copied_at = None;
-                    self.derivation_revision = self.derivation_revision.wrapping_add(1);
-                    self.user_key = None;
-                    self.site_passwd = None;
-                    let secret = SecStr::from(self.input.user_secret.clone());
-                    self.update_identicon(&secret);
-                    let _ = self.derive_tx.send(DeriveRequest {
-                        revision: self.derivation_revision,
-                        user: self.input.user.clone(),
-                        user_secret: secret,
-                    });
-                } else if site_changed && let Err(error) = self.update_site_password() {
-                    log::error!("Failed to generate site password: {error}");
-                    self.site_passwd = None;
-                }
-                if site_changed {
-                    self.copied_at = None;
-                }
-
-                ui.add_space(24.0);
-                let has_password = self.site_passwd.is_some();
-                let has_credentials =
-                    !self.input.user.is_empty() && !self.input.user_secret.is_empty();
-                if has_credentials {
-                    ui.add(egui::Label::new(self.identicon.clone()));
-                } else {
-                    ui.add(egui::Label::new(
-                        RichText::new("?").size(26.0).color(Color32::from_gray(160)),
-                    ));
-                }
-
-                ui.add_space(12.0);
-                let password_text = self
-                    .site_passwd
-                    .as_ref()
-                    .map(|password| std::str::from_utf8(password.unsecure()).unwrap().to_owned())
-                    .unwrap_or_else(|| "...".to_owned());
-                let password_rich_text = RichText::new(&password_text)
-                    .monospace()
-                    .size(28.0)
-                    .strong();
-                let password_rich_text = if has_password {
-                    password_rich_text
-                } else {
-                    password_rich_text.color(Color32::from_gray(160))
-                };
-                ui.add(egui::Label::new(password_rich_text).selectable(true));
-
-                ui.add_space(12.0);
-                let copied = self
-                    .copied_at
-                    .is_some_and(|at| at.elapsed() < Duration::from_secs(2));
-                let copy_button = ui
-                    .add_enabled_ui(has_password, |ui| {
-                        let button = if copied {
-                            egui::Button::new(
-                                RichText::new("Copied")
-                                    .size(LABEL_SIZE)
-                                    .color(Color32::from_rgb(166, 220, 185)),
-                            )
-                            .fill(Color32::from_rgb(37, 61, 47))
-                        } else {
-                            egui::Button::new(
-                                RichText::new("Copy password").size(LABEL_SIZE),
-                            )
-                        };
-                        ui.add(button)
-                    })
-                    .inner;
-                if copy_button.clicked() {
-                    ui.ctx().copy_text(password_text);
-                    self.copied_at = Some(Instant::now());
-                    ui.ctx().request_repaint_after(Duration::from_secs(2));
-                }
+                self.show_form(ui);
+                self.show_password(ui);
             });
         });
     }
 }
 
 impl App {
+    fn receive_derived_keys(&mut self) {
+        while let Ok(derived) = self.derived_rx.try_recv() {
+            if derived.revision != self.derivation_revision {
+                continue;
+            }
+
+            match derived.user_key {
+                Ok(user_key) => {
+                    self.user_key = user_key;
+                    if let Err(error) = self.update_site_password() {
+                        log::error!("Failed to generate site password: {error}");
+                        self.site_passwd = None;
+                    }
+                }
+                Err(error) => {
+                    log::error!("Failed to derive user key: {error}");
+                    self.user_key = None;
+                    self.site_passwd = None;
+                }
+            }
+        }
+    }
+
+    fn show_form(&mut self, ui: &mut egui::Ui) {
+        let field_width = (ui.available_width() - LABEL_WIDTH - FIELD_GAP).clamp(220.0, 300.0);
+        let form_width = LABEL_WIDTH + FIELD_GAP + field_width;
+        let counter_width = (field_width * 0.29).clamp(72.0, 88.0);
+        let type_width = field_width - counter_width - FIELD_GAP;
+
+        ui.spacing_mut().interact_size.y = FIELD_HEIGHT;
+        ui.add_space(20.0);
+        ui.horizontal(|ui| {
+            ui.add_space(((ui.available_width() - form_width) * 0.5).max(0.0));
+            ui.vertical(|ui| {
+                let credentials_changed = self.show_credential_fields(ui, field_width);
+                ui.add_space(12.0);
+                let site_changed =
+                    self.show_site_fields(ui, field_width, type_width, counter_width);
+                self.handle_input_changes(credentials_changed, site_changed);
+            });
+        });
+    }
+
+    fn show_credential_fields(&mut self, ui: &mut egui::Ui, field_width: f32) -> bool {
+        egui::Grid::new("credential_fields")
+            .num_columns(2)
+            .min_col_width(LABEL_WIDTH)
+            .spacing([FIELD_GAP, 10.0])
+            .show(ui, |ui| {
+                ui.label(RichText::new("\u{f007}").size(LABEL_SIZE))
+                    .on_hover_text("User");
+                let username = ui
+                    .add_sized(
+                        [field_width, FIELD_HEIGHT],
+                        egui::TextEdit::singleline(&mut self.input.user)
+                            .font(egui::FontId::proportional(LABEL_SIZE))
+                            .align(egui::Align2::LEFT_CENTER)
+                            .hint_text("User"),
+                    )
+                    .on_hover_text(
+                        "Name used to derive your passwords. Keep it consistent across devices.",
+                    );
+                ui.end_row();
+
+                ui.label(RichText::new("\u{f084}").size(LABEL_SIZE))
+                    .on_hover_text("Secret");
+                let secret = ui
+                    .add_sized(
+                        [field_width, FIELD_HEIGHT],
+                        egui::TextEdit::singleline(&mut self.input.user_secret)
+                            .font(egui::FontId::proportional(LABEL_SIZE))
+                            .align(egui::Align2::LEFT_CENTER)
+                            .password(true)
+                            .hint_text("Secret"),
+                    )
+                    .on_hover_text("Your master secret, used locally to derive your account key.");
+                ui.end_row();
+                username.changed() || secret.changed()
+            })
+            .inner
+    }
+
+    fn show_site_fields(
+        &mut self,
+        ui: &mut egui::Ui,
+        field_width: f32,
+        type_width: f32,
+        counter_width: f32,
+    ) -> bool {
+        egui::Grid::new("site_fields")
+            .num_columns(2)
+            .min_col_width(LABEL_WIDTH)
+            .spacing([FIELD_GAP, 10.0])
+            .show(ui, |ui| {
+                ui.label(RichText::new("\u{f0ac}").size(LABEL_SIZE))
+                    .on_hover_text("Site");
+                let sitename = ui
+                    .add_sized(
+                        [field_width, FIELD_HEIGHT],
+                        egui::TextEdit::singleline(&mut self.input.sitename)
+                            .font(egui::FontId::proportional(LABEL_SIZE))
+                            .align(egui::Align2::LEFT_CENTER)
+                            .hint_text("Site"),
+                    )
+                    .on_hover_text("The site or service this password is for.");
+                ui.end_row();
+
+                let mut pwtype = self.input.pwtype;
+                let mut counter = self.input.counter;
+                ui.label(RichText::new("\u{f1de}").size(LABEL_SIZE))
+                    .on_hover_text("Password type");
+                ui.horizontal(|ui| {
+                    password_type_selector(ui, &mut pwtype, type_width);
+                    ui.add_sized(
+                        [counter_width, FIELD_HEIGHT],
+                        egui::DragValue::new(&mut counter)
+                            .range(1..=u32::MAX)
+                            .speed(0.1),
+                    )
+                    .on_hover_text(
+                        "Password counter. Increase it to create a new password for this site.",
+                    );
+                });
+                ui.end_row();
+                let changed = sitename.changed()
+                    || pwtype != self.input.pwtype
+                    || counter != self.input.counter;
+                self.input.pwtype = pwtype;
+                self.input.counter = counter;
+                changed
+            })
+            .inner
+    }
+
+    fn handle_input_changes(&mut self, credentials_changed: bool, site_changed: bool) {
+        if credentials_changed {
+            self.copied_at = None;
+            self.derivation_revision = self.derivation_revision.wrapping_add(1);
+            self.user_key = None;
+            self.site_passwd = None;
+            let secret = SecStr::from(self.input.user_secret.clone());
+            self.update_identicon(&secret);
+            let _ = self.derive_tx.send(DeriveRequest {
+                revision: self.derivation_revision,
+                user: self.input.user.clone(),
+                user_secret: secret,
+            });
+        } else if site_changed && let Err(error) = self.update_site_password() {
+            log::error!("Failed to generate site password: {error}");
+            self.site_passwd = None;
+        }
+        if site_changed {
+            self.copied_at = None;
+        }
+    }
+
+    fn show_password(&mut self, ui: &mut egui::Ui) {
+        ui.add_space(24.0);
+        self.show_identicon(ui);
+        ui.add_space(12.0);
+
+        let password_text = self.password_text();
+        let password_rich_text = RichText::new(&password_text)
+            .monospace()
+            .size(28.0)
+            .strong();
+        let password_rich_text = if self.site_passwd.is_some() {
+            password_rich_text
+        } else {
+            password_rich_text.color(Color32::from_gray(160))
+        };
+        ui.add(egui::Label::new(password_rich_text).selectable(true));
+        ui.add_space(12.0);
+        self.show_copy_button(ui, password_text);
+    }
+
+    fn show_identicon(&self, ui: &mut egui::Ui) {
+        let has_credentials = !self.input.user.is_empty() && !self.input.user_secret.is_empty();
+        if has_credentials {
+            ui.add(egui::Label::new(self.identicon.clone()));
+        } else {
+            ui.add(egui::Label::new(
+                RichText::new("?").size(26.0).color(Color32::from_gray(160)),
+            ));
+        }
+    }
+
+    fn password_text(&self) -> String {
+        self.site_passwd
+            .as_ref()
+            .map(|password| std::str::from_utf8(password.unsecure()).unwrap().to_owned())
+            .unwrap_or_else(|| "...".to_owned())
+    }
+
+    fn show_copy_button(&mut self, ui: &mut egui::Ui, password_text: String) {
+        let has_password = self.site_passwd.is_some();
+        let copied = self
+            .copied_at
+            .is_some_and(|at| at.elapsed() < Duration::from_secs(2));
+        let copy_button = ui
+            .add_enabled_ui(has_password, |ui| {
+                let button = if copied {
+                    egui::Button::new(
+                        RichText::new("Copied")
+                            .size(LABEL_SIZE)
+                            .color(Color32::from_rgb(166, 220, 185)),
+                    )
+                    .fill(Color32::from_rgb(37, 61, 47))
+                } else {
+                    egui::Button::new(RichText::new("Copy password").size(LABEL_SIZE))
+                };
+                ui.add(button)
+            })
+            .inner;
+        if copy_button.clicked() {
+            ui.ctx().copy_text(password_text);
+            self.copied_at = Some(Instant::now());
+            ui.ctx().request_repaint_after(Duration::from_secs(2));
+        }
+    }
+
     fn update_site_password(&mut self) -> Result<(), spectre_rs::SpectreError> {
         self.site_passwd = match (&self.user_key, self.input.sitename.is_empty()) {
             (Some(user_key), false) => {
@@ -439,6 +442,38 @@ impl App {
         .size(26.0)
         .color(self.identicon_color);
     }
+}
+
+fn password_type_selector(ui: &mut egui::Ui, pwtype: &mut spectre_rs::PwType, width: f32) {
+    egui::ComboBox::from_id_salt("password_type")
+        .selected_text(RichText::new(format!("{pwtype:?}")).size(LABEL_SIZE))
+        .width(width)
+        .show_ui(ui, |ui| {
+            ui.selectable_value(
+                pwtype,
+                spectre_rs::PwType::Medium,
+                RichText::new("Medium").size(LABEL_SIZE),
+            )
+            .on_hover_text("8 characters with symbols.");
+            ui.selectable_value(
+                pwtype,
+                spectre_rs::PwType::Long,
+                RichText::new("Long").size(LABEL_SIZE),
+            )
+            .on_hover_text("14 characters with symbols.");
+            ui.selectable_value(
+                pwtype,
+                spectre_rs::PwType::Basic,
+                RichText::new("Basic").size(LABEL_SIZE),
+            )
+            .on_hover_text("8 characters without symbols.");
+            ui.selectable_value(
+                pwtype,
+                spectre_rs::PwType::Pin,
+                RichText::new("Pin").size(LABEL_SIZE),
+            )
+            .on_hover_text("4 numeric digits.");
+        });
 }
 
 fn relaxed_identicon_color(color: colored::Color) -> Color32 {
