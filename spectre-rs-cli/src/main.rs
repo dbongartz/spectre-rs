@@ -201,18 +201,6 @@ pub enum PwType {
     /// 4 numbers
     #[clap(alias = "i")]
     Pin,
-    /// 9 letter name
-    #[clap(alias = "n")]
-    Name,
-    /// 20 letter sentence
-    #[clap(alias = "p")]
-    Phrase,
-    /// 512 bit key
-    #[clap(alias = "K")]
-    Key,
-    /// saved personal password
-    #[clap(alias = "P")]
-    Personal,
 }
 
 impl From<PwType> for spectre_rs::PwType {
@@ -224,10 +212,6 @@ impl From<PwType> for spectre_rs::PwType {
             PwType::Basic => spectre_rs::PwType::Basic,
             PwType::Short => spectre_rs::PwType::Short,
             PwType::Pin => spectre_rs::PwType::Pin,
-            PwType::Name => spectre_rs::PwType::Name,
-            PwType::Phrase => spectre_rs::PwType::Phrase,
-            PwType::Key => spectre_rs::PwType::Key,
-            PwType::Personal => spectre_rs::PwType::Personal,
         }
     }
 }

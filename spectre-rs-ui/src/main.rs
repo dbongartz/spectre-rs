@@ -215,7 +215,7 @@ impl App {
                     spectre_rs::Scope::Authentication,
                     1,
                 )?;
-                Some(spectre_rs::gen_site_password(&seed, self.input.pwtype))
+                Some(spectre_rs::gen_site_password(&seed, self.input.pwtype)?)
             }
             _ => None,
         };

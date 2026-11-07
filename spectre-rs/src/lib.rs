@@ -11,6 +11,7 @@ pub enum SpectreError {
     InvalidScryptParameters,
     InvalidScryptOutputLength,
     InvalidHmacKeyLength,
+    UnsupportedPasswordType(PwType),
 }
 
 impl std::fmt::Display for SpectreError {
@@ -20,6 +21,9 @@ impl std::fmt::Display for SpectreError {
             Self::InvalidScryptParameters => f.write_str("invalid scrypt parameters"),
             Self::InvalidScryptOutputLength => f.write_str("invalid scrypt output length"),
             Self::InvalidHmacKeyLength => f.write_str("invalid HMAC key length"),
+            Self::UnsupportedPasswordType(pw_type) => {
+                write!(f, "password type {pw_type:?} is not supported yet")
+            }
         }
     }
 }
@@ -85,14 +89,14 @@ pub fn gen_site_seed(
     ))
 }
 
-pub fn gen_site_password(site_seed: &SecStr, pw_type: PwType) -> SecStr {
-    let pw_type = PwType::get_template(pw_type);
+pub fn gen_site_password(site_seed: &SecStr, pw_type: PwType) -> Result<SecStr, SpectreError> {
+    let pw_type = PwType::get_template(pw_type)?;
 
     let mut site_seed_iter = site_seed.unsecure().iter().map(|&b| usize::from(b));
 
     let template = pw_type[site_seed_iter.next().unwrap() % pw_type.len()];
 
-    SecStr::from(
+    Ok(SecStr::from(
         template
             .chars()
             .zip(site_seed_iter)
@@ -101,7 +105,7 @@ pub fn gen_site_password(site_seed: &SecStr, pw_type: PwType) -> SecStr {
                 char_class.chars().nth(site_key % char_class.len()).unwrap() as u8
             })
             .collect::<Vec<_>>(),
-    )
+    ))
 }
 
 /// Convenience function to generate a site password.
@@ -115,7 +119,7 @@ pub fn get_site_password(
 ) -> Result<SecStr, SpectreError> {
     let user_key = gen_user_key(user_name, user_secret, purpose)?;
     let site_seed = gen_site_seed(site_name, &user_key, purpose, counter)?;
-    Ok(gen_site_password(&site_seed, pw_type))
+    gen_site_password(&site_seed, pw_type)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -132,13 +136,13 @@ pub enum PwType {
     Short,
     /// 4 numbers
     Pin,
-    /// 9 letter name
+    /// 9 letter name (not supported yet)
     Name,
-    /// 20 letter sentence
+    /// 20 letter sentence (not supported yet)
     Phrase,
-    /// 512 bit key
+    /// 512 bit key (not supported yet)
     Key,
-    /// saved personal password
+    /// saved personal password (not supported yet)
     Personal,
 }
 
@@ -177,15 +181,15 @@ const fn get_char_class(template: char) -> &'static str {
 }
 
 impl PwType {
-    const fn get_template(pw_type: Self) -> &'static [&'static str] {
+    const fn get_template(pw_type: Self) -> Result<&'static [&'static str], SpectreError> {
         match pw_type {
-            Self::Maximum => templates::RESULT_TYPE_MAXIMUM,
-            Self::Long => templates::RESULT_TYPE_LONG,
-            Self::Medium => templates::RESULT_TYPE_MEDIUM,
-            Self::Basic => templates::RESULT_TYPE_BASIC,
-            Self::Short => templates::RESULT_TYPE_SHORT,
-            Self::Pin => templates::RESULT_TYPE_PIN,
-            Self::Name | Self::Phrase | Self::Key | Self::Personal => todo!(),
+            Self::Maximum => Ok(templates::RESULT_TYPE_MAXIMUM),
+            Self::Long => Ok(templates::RESULT_TYPE_LONG),
+            Self::Medium => Ok(templates::RESULT_TYPE_MEDIUM),
+            Self::Basic => Ok(templates::RESULT_TYPE_BASIC),
+            Self::Short => Ok(templates::RESULT_TYPE_SHORT),
+            Self::Pin => Ok(templates::RESULT_TYPE_PIN),
+            unsupported => Err(SpectreError::UnsupportedPasswordType(unsupported)),
         }
     }
 }
