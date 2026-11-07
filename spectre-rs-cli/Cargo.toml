@@ -1,6 +1,6 @@
 [package]
 name = "spectre-rs-cli"
-version = "0.2.3"
+version.workspace = true
 edition = "2024"
 description = "A clone of the spectre password manager cli written in Rust."
 

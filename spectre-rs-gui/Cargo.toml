@@ -1,6 +1,6 @@
 [package]
 name = "spectre-rs-gui"
-version = "0.2.0"
+version.workspace = true
 edition = "2024"
 description = "Spectre password manager UI written in Rust."
 

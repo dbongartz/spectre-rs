@@ -1,0 +1,40 @@
+pkgname=spectre-rs-git
+pkgver=0.2.3
+pkgrel=1
+pkgdesc="Spectre-compatible password manager CLI and GUI (development version)"
+arch=('x86_64' 'aarch64')
+url="https://github.com/dbongartz/spectre-rs"
+license=('unknown')
+depends=('gcc-libs' 'vulkan-icd-loader' 'wayland')
+makedepends=('cargo' 'jq')
+source=("git+https://github.com/dbongartz/spectre-rs.git#branch=main")
+sha256sums=('SKIP')
+
+pkgver() {
+  cd "$srcdir/spectre-rs"
+
+  # Read Cargo's package metadata and require both apps to share one version.
+  local version
+  version=$(cargo metadata --no-deps --format-version 1 | jq -er '
+    [.packages[] | select(.name == "spectre-rs-cli" or .name == "spectre-rs-gui") | .version]
+    | if length == 2 and .[0] == .[1] then .[0] else error("CLI and GUI versions must match") end
+  ') || return 1
+
+  printf '%s.r%s.g%s\n' "$version" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+}
+
+build() {
+  cd "$srcdir/spectre-rs"
+  cargo build --release --locked --workspace
+}
+
+package() {
+  cd "$srcdir/spectre-rs"
+
+  install -Dm755 target/release/spectre-rs "$pkgdir/usr/bin/spectre-rs"
+  install -Dm755 target/release/spectre-rs-gui "$pkgdir/usr/bin/spectre-rs-gui"
+  install -Dm644 packaging/linux/spectre-rs-gui.desktop \
+    "$pkgdir/usr/share/applications/spectre-rs-gui.desktop"
+  install -Dm644 packaging/linux/hicolor/scalable/apps/spectre-rs-gui.svg \
+    "$pkgdir/usr/share/icons/hicolor/scalable/apps/spectre-rs-gui.svg"
+}
