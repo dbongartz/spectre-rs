@@ -1,6 +1,6 @@
 [package]
 name = "spectre-rs-core"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2024"
 description = "A clone of the spectre password manager library written in Rust."
 

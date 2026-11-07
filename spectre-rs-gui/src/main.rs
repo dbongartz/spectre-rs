@@ -19,8 +19,8 @@ fn main() -> eframe::Result {
         viewport: egui::ViewportBuilder::default()
             .with_app_id("spectre-rs-gui")
             .with_icon(app_icon())
-            .with_inner_size([440.0, 440.0])
-            .with_min_inner_size([440.0, 440.0]),
+            .with_inner_size([440.0, 450.0])
+            .with_min_inner_size([440.0, 450.0]),
         ..Default::default()
     };
     eframe::run_native(
@@ -36,6 +36,7 @@ fn app_icon() -> egui::IconData {
 }
 
 const APP_TITLE: &str = "Spectre Password Manager";
+const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 const LABEL_WIDTH: f32 = 30.0;
 const FIELD_GAP: f32 = 8.0;
 const FIELD_HEIGHT: f32 = 38.0;
@@ -97,6 +98,16 @@ impl App {
             "fontawesome",
             egui::FontData::from_static(include_bytes!(
                 "../assets/fonts/FiraMonoNerdFont-Medium.otf"
+            )),
+            vec![egui::epaint::text::InsertFontFamily {
+                family: egui::FontFamily::Proportional,
+                priority: egui::epaint::text::FontPriority::Lowest,
+            }],
+        ));
+        cc.egui_ctx.add_font(egui::epaint::text::FontInsert::new(
+            "noto_symbols",
+            egui::FontData::from_static(include_bytes!(
+                "../assets/fonts/NotoSansSymbols2-Regular.ttf"
             )),
             vec![egui::epaint::text::InsertFontFamily {
                 family: egui::FontFamily::Proportional,
@@ -189,6 +200,14 @@ impl eframe::App for App {
             ui.vertical_centered(|ui| {
                 self.show_form(ui);
                 self.show_password(ui);
+            });
+            ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new(format!("{APP_TITLE} - v{APP_VERSION}"))
+                        .size(11.0)
+                        .color(Color32::from_gray(120)),
+                );
             });
         });
     }
