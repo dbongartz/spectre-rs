@@ -1,5 +1,5 @@
 pkgname=spectre-rs-git
-pkgver=0.2.3
+pkgver=0.2.3.r28.gaf25110
 pkgrel=1
 pkgdesc="Spectre-compatible password manager CLI and GUI (development version)"
 arch=('x86_64' 'aarch64')
@@ -25,7 +25,8 @@ pkgver() {
 
 build() {
   cd "$srcdir/spectre-rs"
-  cargo build --release --locked --workspace
+  # mimalloc's GCC-LTO C archive cannot be linked by rust-lld.
+  CFLAGS="${CFLAGS//-flto=auto/}" cargo build --release --locked --workspace
 }
 
 package() {
