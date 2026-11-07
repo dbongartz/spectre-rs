@@ -52,7 +52,7 @@ struct DeriveRequest {
 
 struct DerivedKey {
     revision: u64,
-    user_key: Option<SecStr>,
+    user_key: Result<Option<SecStr>, spectre_rs::SpectreError>,
 }
 
 impl Input {
@@ -95,13 +95,14 @@ impl App {
                     }
 
                     let user_key = if latest.user.is_empty() || latest.user_secret.unsecure().is_empty() {
-                        None
+                        Ok(None)
                     } else {
-                        Some(spectre_rs::gen_user_key(
+                        spectre_rs::gen_user_key(
                             &latest.user,
                             &latest.user_secret,
                             spectre_rs::Scope::Authentication,
-                        ))
+                        )
+                        .map(Some)
                     };
                     let _ = derived_tx.send(DerivedKey {
                         revision: latest.revision,
@@ -129,8 +130,20 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         while let Ok(derived) = self.derived_rx.try_recv() {
             if derived.revision == self.derivation_revision {
-                self.user_key = derived.user_key;
-                self.update_site_password();
+                match derived.user_key {
+                    Ok(user_key) => {
+                        self.user_key = user_key;
+                        if let Err(error) = self.update_site_password() {
+                            log::error!("Failed to generate site password: {error}");
+                            self.site_passwd = None;
+                        }
+                    }
+                    Err(error) => {
+                        log::error!("Failed to derive user key: {error}");
+                        self.user_key = None;
+                        self.site_passwd = None;
+                    }
+                }
             }
         }
 
@@ -176,8 +189,11 @@ impl eframe::App for App {
                         user: self.input.user.clone(),
                         user_secret: secret,
                     });
-                } else if site_changed {
-                    self.update_site_password();
+                } else if site_changed
+                    && let Err(error) = self.update_site_password()
+                {
+                    log::error!("Failed to generate site password: {error}");
+                    self.site_passwd = None;
                 }
 
                 ui.add(egui::Label::new(self.identicon.clone()));
@@ -190,7 +206,7 @@ impl eframe::App for App {
 }
 
 impl App {
-    fn update_site_password(&mut self) {
+    fn update_site_password(&mut self) -> Result<(), spectre_rs::SpectreError> {
         self.site_passwd = match (&self.user_key, self.input.sitename.is_empty()) {
             (Some(user_key), false) => {
                 let seed = spectre_rs::gen_site_seed(
@@ -198,11 +214,12 @@ impl App {
                     user_key,
                     spectre_rs::Scope::Authentication,
                     1,
-                );
+                )?;
                 Some(spectre_rs::gen_site_password(&seed, self.input.pwtype))
             }
             _ => None,
         };
+        Ok(())
     }
 
     fn update_identicon(&mut self, secret: &SecStr) {

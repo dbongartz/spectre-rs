@@ -5,11 +5,39 @@ use secstr::SecStr;
 
 pub type HmacSha256 = hmac::Hmac<sha2::Sha256>;
 
-pub fn gen_user_key(user_name: &str, user_secret: &SecStr, scope: Scope) -> SecStr {
+#[derive(Debug)]
+pub enum SpectreError {
+    InputTooLong(&'static str),
+    InvalidScryptParameters,
+    InvalidScryptOutputLength,
+    InvalidHmacKeyLength,
+}
+
+impl std::fmt::Display for SpectreError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InputTooLong(name) => write!(f, "{name} is too long"),
+            Self::InvalidScryptParameters => f.write_str("invalid scrypt parameters"),
+            Self::InvalidScryptOutputLength => f.write_str("invalid scrypt output length"),
+            Self::InvalidHmacKeyLength => f.write_str("invalid HMAC key length"),
+        }
+    }
+}
+
+impl std::error::Error for SpectreError {}
+
+pub fn gen_user_key(
+    user_name: &str,
+    user_secret: &SecStr,
+    scope: Scope,
+) -> Result<SecStr, SpectreError> {
     let seed = {
         let mut seed = Vec::new();
         seed.extend(Scope::get_template(scope));
-        seed.write_u32::<BigEndian>(user_name.len() as u32).unwrap();
+        let name_len = u32::try_from(user_name.len())
+            .map_err(|_| SpectreError::InputTooLong("user name"))?;
+        seed.write_u32::<BigEndian>(name_len)
+            .map_err(|_| SpectreError::InputTooLong("user name"))?;
         seed.extend(user_name.bytes());
         SecStr::new(seed)
     };
@@ -24,29 +52,37 @@ pub fn gen_user_key(user_name: &str, user_secret: &SecStr, scope: Scope) -> SecS
     scrypt(
         user_secret.unsecure(),
         seed.unsecure(),
-        &scrypt::Params::new(LOG2_N, R, P).unwrap(),
+        &scrypt::Params::new(LOG2_N, R, P).map_err(|_| SpectreError::InvalidScryptParameters)?,
         user_key.unsecure_mut(),
     )
-    .unwrap();
+    .map_err(|_| SpectreError::InvalidScryptOutputLength)?;
 
-    user_key
+    Ok(user_key)
 }
 
-pub fn gen_site_seed(site_name: &str, user_key: &SecStr, scope: Scope, counter: u32) -> SecStr {
+pub fn gen_site_seed(
+    site_name: &str,
+    user_key: &SecStr,
+    scope: Scope,
+    counter: u32,
+) -> Result<SecStr, SpectreError> {
     let mut seed = Vec::new();
     seed.extend(Scope::get_template(scope));
-    seed.write_u32::<BigEndian>(site_name.len() as u32).unwrap();
+    let name_len = u32::try_from(site_name.len())
+        .map_err(|_| SpectreError::InputTooLong("site name"))?;
+    seed.write_u32::<BigEndian>(name_len)
+        .map_err(|_| SpectreError::InputTooLong("site name"))?;
     seed.extend(site_name.bytes());
     seed.write_u32::<BigEndian>(counter).unwrap();
 
-    SecStr::from(
+    Ok(SecStr::from(
         HmacSha256::new_from_slice(user_key.unsecure())
-            .unwrap()
+            .map_err(|_| SpectreError::InvalidHmacKeyLength)?
             .chain_update(seed)
             .finalize()
             .into_bytes()
             .as_slice(),
-    )
+    ))
 }
 
 pub fn gen_site_password(site_seed: &SecStr, pw_type: PwType) -> SecStr {
@@ -76,10 +112,10 @@ pub fn get_site_password(
     counter: u32,
     pw_type: PwType,
     purpose: Scope,
-) -> SecStr {
-    let user_key = gen_user_key(user_name, user_secret, purpose);
-    let site_seed = gen_site_seed(site_name, &user_key, purpose, counter);
-    gen_site_password(&site_seed, pw_type)
+) -> Result<SecStr, SpectreError> {
+    let user_key = gen_user_key(user_name, user_secret, purpose)?;
+    let site_seed = gen_site_seed(site_name, &user_key, purpose, counter)?;
+    Ok(gen_site_password(&site_seed, pw_type))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

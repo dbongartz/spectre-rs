@@ -1,5 +1,5 @@
 use std::error::Error;
-use std::io;
+use std::io::{self, BufRead};
 
 use clap::{
     Parser,
@@ -16,9 +16,17 @@ struct Args {
     #[clap(short = 'u', long, env = "SPECTRE_USERNAME")]
     user_name: Option<String>,
 
-    /// Specify the secret to use. INSECURE!
-    #[clap(short = 'S', long)]
+    /// Supply the secret as a command-line argument. INSECURE: visible in process listings/history.
+    #[clap(
+        short = 'S',
+        long,
+        long_help = "Supply the secret as a command-line argument. This is insecure because arguments may be visible in process listings or shell history. Prefer the hidden prompt for interactive use or --secret-stdin for scripts."
+    )]
     secret: Option<SecStr>,
+
+    /// Read one secret line from stdin (for scripts; avoids exposing it in argv).
+    #[clap(long, conflicts_with = "secret")]
+    secret_stdin: bool,
 
     /// Specify the type of password to generate.
     #[clap(short = 't', long, value_enum, default_value_t=PwType::Long)]
@@ -54,7 +62,12 @@ fn run() -> Result<(), Box<dyn Error>> {
             Some(user_name) => user_name,
             None => return Ok(()),
         },
-    };
+    }
+    .trim()
+    .to_owned();
+    if user_name.is_empty() {
+        return Err("User name cannot be empty".into());
+    }
 
     u32::try_from(user_name.len()).map_err(|_| "User name too long")?;
 
@@ -64,13 +77,19 @@ fn run() -> Result<(), Box<dyn Error>> {
             Some(site_name) => site_name,
             None => return Ok(()),
         },
-    };
+    }
+    .trim()
+    .to_owned();
+    if site_name.is_empty() {
+        return Err("Site name cannot be empty".into());
+    }
 
     u32::try_from(site_name.len()).map_err(|_| "Site name too long")?;
 
-    let user_secret = match args.secret {
-        Some(secret) => secret,
-        None => match read_secret()? {
+    let user_secret = match (args.secret, args.secret_stdin) {
+        (Some(secret), _) => secret,
+        (None, true) => read_secret_stdin()?,
+        (None, false) => match read_secret()? {
             Some(secret) => secret,
             None => return Ok(()),
         },
@@ -87,7 +106,7 @@ fn run() -> Result<(), Box<dyn Error>> {
         counter,
         args.pw_type.into(),
         args.purpose.into(),
-    );
+    )?;
 
     let identicon = Identicon::from(&user_secret, &user_name);
 
@@ -130,6 +149,19 @@ fn read_secret() -> io::Result<Option<SecStr>> {
         }
         Err(error) => Err(error),
     }
+}
+
+fn read_secret_stdin() -> io::Result<SecStr> {
+    let mut secret = String::new();
+    let bytes_read = io::stdin().lock().read_line(&mut secret)?;
+    if bytes_read == 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::UnexpectedEof,
+            "no secret line was provided on stdin",
+        ));
+    }
+    secret.truncate(secret.trim_end_matches(['\r', '\n']).len());
+    Ok(SecStr::from(secret))
 }
 
 const CLAP_STYLE: Styles = Styles::styled()
