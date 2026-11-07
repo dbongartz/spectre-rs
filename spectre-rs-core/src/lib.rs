@@ -1,4 +1,3 @@
-use byteorder::{BigEndian, WriteBytesExt};
 use hmac::{KeyInit, Mac};
 use scrypt::scrypt;
 use secstr::SecStr;
@@ -11,6 +10,7 @@ pub enum SpectreError {
     InvalidScryptParameters,
     InvalidScryptOutputLength,
     InvalidHmacKeyLength,
+    InvalidSiteSeedLength,
     UnsupportedPasswordType(PwType),
 }
 
@@ -21,6 +21,7 @@ impl std::fmt::Display for SpectreError {
             Self::InvalidScryptParameters => f.write_str("invalid scrypt parameters"),
             Self::InvalidScryptOutputLength => f.write_str("invalid scrypt output length"),
             Self::InvalidHmacKeyLength => f.write_str("invalid HMAC key length"),
+            Self::InvalidSiteSeedLength => f.write_str("invalid site seed length"),
             Self::UnsupportedPasswordType(pw_type) => {
                 write!(f, "password type {pw_type:?} is not supported yet")
             }
@@ -35,16 +36,11 @@ pub fn gen_user_key(
     user_secret: &SecStr,
     scope: Scope,
 ) -> Result<SecStr, SpectreError> {
-    let seed = {
-        let mut seed = Vec::new();
-        seed.extend(Scope::get_template(scope));
-        let name_len = u32::try_from(user_name.len())
-            .map_err(|_| SpectreError::InputTooLong("user name"))?;
-        seed.write_u32::<BigEndian>(name_len)
-            .map_err(|_| SpectreError::InputTooLong("user name"))?;
-        seed.extend(user_name.bytes());
-        SecStr::new(seed)
-    };
+    let seed = SecStr::new(name_seed(
+        user_name,
+        Scope::get_template(scope),
+        "user name",
+    )?);
 
     const N: u32 = 32768;
     const LOG2_N: u8 = u32::ilog2(N) as u8;
@@ -70,14 +66,8 @@ pub fn gen_site_seed(
     scope: Scope,
     counter: u32,
 ) -> Result<SecStr, SpectreError> {
-    let mut seed = Vec::new();
-    seed.extend(Scope::get_template(scope));
-    let name_len = u32::try_from(site_name.len())
-        .map_err(|_| SpectreError::InputTooLong("site name"))?;
-    seed.write_u32::<BigEndian>(name_len)
-        .map_err(|_| SpectreError::InputTooLong("site name"))?;
-    seed.extend(site_name.bytes());
-    seed.write_u32::<BigEndian>(counter).unwrap();
+    let mut seed = name_seed(site_name, Scope::get_template(scope), "site name")?;
+    seed.extend(counter.to_be_bytes());
 
     Ok(SecStr::from(
         HmacSha256::new_from_slice(user_key.unsecure())
@@ -92,20 +82,42 @@ pub fn gen_site_seed(
 pub fn gen_site_password(site_seed: &SecStr, pw_type: PwType) -> Result<SecStr, SpectreError> {
     let pw_type = PwType::get_template(pw_type)?;
 
-    let mut site_seed_iter = site_seed.unsecure().iter().map(|&b| usize::from(b));
-
-    let template = pw_type[site_seed_iter.next().unwrap() % pw_type.len()];
+    let site_seed = site_seed.unsecure();
+    let template_index = usize::from(
+        *site_seed
+            .first()
+            .ok_or(SpectreError::InvalidSiteSeedLength)?,
+    );
+    let template = pw_type[template_index % pw_type.len()];
+    if site_seed.len() < template.len() + 1 {
+        return Err(SpectreError::InvalidSiteSeedLength);
+    }
 
     Ok(SecStr::from(
         template
             .chars()
-            .zip(site_seed_iter)
-            .map(|(tchar, site_key)| {
+            .zip(site_seed.iter().skip(1))
+            .map(|(tchar, &site_key)| {
                 let char_class = get_char_class(tchar);
-                char_class.chars().nth(site_key % char_class.len()).unwrap() as u8
+                let character_index = usize::from(site_key) % char_class.len();
+                char_class.as_bytes()[character_index]
             })
             .collect::<Vec<_>>(),
     ))
+}
+
+fn name_seed(
+    name: &str,
+    scope_template: &[u8],
+    name_kind: &'static str,
+) -> Result<Vec<u8>, SpectreError> {
+    let name_length =
+        u32::try_from(name.len()).map_err(|_| SpectreError::InputTooLong(name_kind))?;
+    let mut seed = Vec::with_capacity(scope_template.len() + 4 + name.len());
+    seed.extend(scope_template);
+    seed.extend(name_length.to_be_bytes());
+    seed.extend(name.bytes());
+    Ok(seed)
 }
 
 /// Convenience function to generate a site password.

@@ -1,5 +1,5 @@
 [workspace]
-members = ["spectre-rs", "spectre-rs-cli", "spectre-rs-ui"]
+members = ["spectre-rs-core", "spectre-rs-cli", "spectre-rs-ui"]
 resolver = "3"
 
 # [profile.release]

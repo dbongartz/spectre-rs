@@ -7,7 +7,7 @@ use clap::{
 };
 use rustyline::{DefaultEditor, error::ReadlineError};
 use secstr::SecStr;
-use spectre_rs::{get_site_password, identicon::Identicon};
+use spectre_rs_core::{get_site_password, identicon::Identicon};
 
 #[derive(Debug, Parser)]
 #[clap(version, about, author, long_about = None, styles = CLAP_STYLE)]
@@ -51,68 +51,99 @@ fn main() {
 }
 
 fn run() -> Result<(), Box<dyn Error>> {
-    // -------- Argument Parsing & TUI --------
-
-    let args = Args::parse();
+    let Args {
+        user_name: provided_user_name,
+        site_name: provided_site_name,
+        secret,
+        secret_stdin,
+        pw_type,
+        counter,
+        purpose,
+    } = Args::parse();
     let mut editor = DefaultEditor::new()?;
 
-    let user_name = match args.user_name {
-        Some(user_name) => user_name,
-        None => match read_prompt(&mut editor, "Enter user name: ")? {
-            Some(user_name) => user_name,
-            None => return Ok(()),
-        },
-    }
-    .trim()
-    .to_owned();
-    if user_name.is_empty() {
-        return Err("User name cannot be empty".into());
-    }
-
-    u32::try_from(user_name.len()).map_err(|_| "User name too long")?;
-
-    let site_name = match args.site_name {
-        Some(site_name) => site_name,
-        None => match read_prompt(&mut editor, "Enter site name: ")? {
-            Some(site_name) => site_name,
-            None => return Ok(()),
-        },
-    }
-    .trim()
-    .to_owned();
-    if site_name.is_empty() {
-        return Err("Site name cannot be empty".into());
-    }
-
-    u32::try_from(site_name.len()).map_err(|_| "Site name too long")?;
-
-    let user_secret = match (args.secret, args.secret_stdin) {
-        (Some(secret), _) => secret,
-        (None, true) => read_secret_stdin()?,
-        (None, false) => match read_secret()? {
-            Some(secret) => secret,
-            None => return Ok(()),
-        },
+    let Some(user_name) = read_name(&mut editor, provided_user_name, "Enter user name: ", "User")?
+    else {
+        return Ok(());
+    };
+    let Some(site_name) = read_name(&mut editor, provided_site_name, "Enter site name: ", "Site")?
+    else {
+        return Ok(());
+    };
+    let Some(user_secret) = read_user_secret(secret, secret_stdin)? else {
+        return Ok(());
     };
 
-    let counter = args.counter;
-
-    // -------- Key Derivation --------
-
-    let site_password = get_site_password(
+    generate_and_print(
         &user_name,
         &user_secret,
         &site_name,
         counter,
-        args.pw_type.into(),
-        args.purpose.into(),
+        pw_type,
+        purpose,
+    )
+}
+
+fn read_name(
+    editor: &mut DefaultEditor,
+    provided_name: Option<String>,
+    prompt: &str,
+    name_kind: &str,
+) -> Result<Option<String>, Box<dyn Error>> {
+    let name = match provided_name {
+        Some(name) => name,
+        None => match read_prompt(editor, prompt)? {
+            Some(name) => name,
+            None => return Ok(None),
+        },
+    }
+    .trim()
+    .to_owned();
+
+    if name.is_empty() {
+        return Err(format!("{name_kind} name cannot be empty").into());
+    }
+
+    u32::try_from(name.len()).map_err(|_| format!("{name_kind} name too long"))?;
+    Ok(Some(name))
+}
+
+fn read_user_secret(secret: Option<SecStr>, secret_stdin: bool) -> io::Result<Option<SecStr>> {
+    match (secret, secret_stdin) {
+        (Some(secret), _) => Ok(Some(secret)),
+        (None, true) => read_secret_stdin().map(Some),
+        (None, false) => read_secret(),
+    }
+}
+
+fn generate_and_print(
+    user_name: &str,
+    user_secret: &SecStr,
+    site_name: &str,
+    counter: u32,
+    pw_type: PwType,
+    purpose: Scope,
+) -> Result<(), Box<dyn Error>> {
+    let site_password = get_site_password(
+        user_name,
+        user_secret,
+        site_name,
+        counter,
+        pw_type.into(),
+        purpose.into(),
     )?;
 
-    let identicon = Identicon::from(&user_secret, &user_name);
+    print_password(&site_password, user_secret, user_name)?;
+    Ok(())
+}
 
-    // ------- Print Identicon and Password --------
-
+fn print_password(
+    site_password: &SecStr,
+    user_secret: &SecStr,
+    user_name: &str,
+) -> Result<(), Box<dyn Error>> {
     let pw_str = std::str::from_utf8(site_password.unsecure())?;
+    let identicon = Identicon::from(user_secret, user_name);
 
     use std::io::IsTerminal;
     if !std::io::stdout().is_terminal() {
@@ -203,15 +234,15 @@ pub enum PwType {
     Pin,
 }
 
-impl From<PwType> for spectre_rs::PwType {
+impl From<PwType> for spectre_rs_core::PwType {
     fn from(pw_type: PwType) -> Self {
         match pw_type {
-            PwType::Maximum => spectre_rs::PwType::Maximum,
-            PwType::Long => spectre_rs::PwType::Long,
-            PwType::Medium => spectre_rs::PwType::Medium,
-            PwType::Basic => spectre_rs::PwType::Basic,
-            PwType::Short => spectre_rs::PwType::Short,
-            PwType::Pin => spectre_rs::PwType::Pin,
+            PwType::Maximum => spectre_rs_core::PwType::Maximum,
+            PwType::Long => spectre_rs_core::PwType::Long,
+            PwType::Medium => spectre_rs_core::PwType::Medium,
+            PwType::Basic => spectre_rs_core::PwType::Basic,
+            PwType::Short => spectre_rs_core::PwType::Short,
+            PwType::Pin => spectre_rs_core::PwType::Pin,
         }
     }
 }
@@ -229,12 +260,12 @@ pub enum Scope {
     Recovery,
 }
 
-impl From<Scope> for spectre_rs::Scope {
+impl From<Scope> for spectre_rs_core::Scope {
     fn from(scope: Scope) -> Self {
         match scope {
-            Scope::Authentication => spectre_rs::Scope::Authentication,
-            Scope::Identification => spectre_rs::Scope::Identification,
-            Scope::Recovery => spectre_rs::Scope::Recovery,
+            Scope::Authentication => spectre_rs_core::Scope::Authentication,
+            Scope::Identification => spectre_rs_core::Scope::Identification,
+            Scope::Recovery => spectre_rs_core::Scope::Recovery,
         }
     }
 }

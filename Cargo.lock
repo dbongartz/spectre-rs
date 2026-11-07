@@ -261,12 +261,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "byteorder"
-version = "1.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
-
-[[package]]
 name = "byteorder-lite"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2787,18 +2781,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "spectre-rs"
-version = "0.1.1"
-dependencies = [
- "byteorder",
- "colored",
- "hmac",
- "scrypt",
- "secstr",
- "sha2",
-]
-
-[[package]]
 name = "spectre-rs-cli"
 version = "0.2.1"
 dependencies = [
@@ -2806,7 +2788,18 @@ dependencies = [
  "rpassword",
  "rustyline",
  "secstr",
- "spectre-rs",
+ "spectre-rs-core",
+]
+
+[[package]]
+name = "spectre-rs-core"
+version = "0.1.1"
+dependencies = [
+ "colored",
+ "hmac",
+ "scrypt",
+ "secstr",
+ "sha2",
 ]
 
 [[package]]
@@ -2821,7 +2814,7 @@ dependencies = [
  "log",
  "mimalloc",
  "secstr",
- "spectre-rs",
+ "spectre-rs-core",
  "wgpu",
 ]
 

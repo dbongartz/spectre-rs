@@ -51,7 +51,7 @@ struct App {
 struct Input {
     user: String,
     user_secret: String,
-    pwtype: spectre_rs::PwType,
+    pwtype: spectre_rs_core::PwType,
     sitename: String,
     counter: u32,
 }
@@ -64,7 +64,7 @@ struct DeriveRequest {
 
 struct DerivedKey {
     revision: u64,
-    user_key: Result<Option<SecStr>, spectre_rs::SpectreError>,
+    user_key: Result<Option<SecStr>, spectre_rs_core::SpectreError>,
 }
 
 impl Input {
@@ -73,7 +73,7 @@ impl Input {
             user: String::new(),
             user_secret: String::new(),
             sitename: String::new(),
-            pwtype: spectre_rs::PwType::Medium,
+            pwtype: spectre_rs_core::PwType::Medium,
             counter: 1,
         }
     }
@@ -140,14 +140,16 @@ fn start_key_derivation(
     (derive_tx, derived_rx)
 }
 
-fn derive_user_key(request: &DeriveRequest) -> Result<Option<SecStr>, spectre_rs::SpectreError> {
+fn derive_user_key(
+    request: &DeriveRequest,
+) -> Result<Option<SecStr>, spectre_rs_core::SpectreError> {
     if request.user.is_empty() || request.user_secret.unsecure().is_empty() {
         Ok(None)
     } else {
-        spectre_rs::gen_user_key(
+        spectre_rs_core::gen_user_key(
             &request.user,
             &request.user_secret,
-            spectre_rs::Scope::Authentication,
+            spectre_rs_core::Scope::Authentication,
         )
         .map(Some)
     }
@@ -407,16 +409,19 @@ impl App {
         }
     }
 
-    fn update_site_password(&mut self) -> Result<(), spectre_rs::SpectreError> {
+    fn update_site_password(&mut self) -> Result<(), spectre_rs_core::SpectreError> {
         self.site_passwd = match (&self.user_key, self.input.sitename.is_empty()) {
             (Some(user_key), false) => {
-                let seed = spectre_rs::gen_site_seed(
+                let seed = spectre_rs_core::gen_site_seed(
                     &self.input.sitename,
                     user_key,
-                    spectre_rs::Scope::Authentication,
+                    spectre_rs_core::Scope::Authentication,
                     self.input.counter,
                 )?;
-                Some(spectre_rs::gen_site_password(&seed, self.input.pwtype)?)
+                Some(spectre_rs_core::gen_site_password(
+                    &seed,
+                    self.input.pwtype,
+                )?)
             }
             _ => None,
         };
@@ -430,7 +435,7 @@ impl App {
             return;
         }
 
-        let icon = spectre_rs::identicon::Identicon::from(secret, &self.input.user);
+        let icon = spectre_rs_core::identicon::Identicon::from(secret, &self.input.user);
         self.identicon_color = relaxed_identicon_color(icon.get_ansi_color());
         self.identicon = RichText::new(std::format!(
             "{}{}{}{}",
@@ -444,32 +449,32 @@ impl App {
     }
 }
 
-fn password_type_selector(ui: &mut egui::Ui, pwtype: &mut spectre_rs::PwType, width: f32) {
+fn password_type_selector(ui: &mut egui::Ui, pwtype: &mut spectre_rs_core::PwType, width: f32) {
     egui::ComboBox::from_id_salt("password_type")
         .selected_text(RichText::new(format!("{pwtype:?}")).size(LABEL_SIZE))
         .width(width)
         .show_ui(ui, |ui| {
             ui.selectable_value(
                 pwtype,
-                spectre_rs::PwType::Medium,
+                spectre_rs_core::PwType::Medium,
                 RichText::new("Medium").size(LABEL_SIZE),
             )
             .on_hover_text("8 characters with symbols.");
             ui.selectable_value(
                 pwtype,
-                spectre_rs::PwType::Long,
+                spectre_rs_core::PwType::Long,
                 RichText::new("Long").size(LABEL_SIZE),
             )
             .on_hover_text("14 characters with symbols.");
             ui.selectable_value(
                 pwtype,
-                spectre_rs::PwType::Basic,
+                spectre_rs_core::PwType::Basic,
                 RichText::new("Basic").size(LABEL_SIZE),
             )
             .on_hover_text("8 characters without symbols.");
             ui.selectable_value(
                 pwtype,
-                spectre_rs::PwType::Pin,
+                spectre_rs_core::PwType::Pin,
                 RichText::new("Pin").size(LABEL_SIZE),
             )
             .on_hover_text("4 numeric digits.");
