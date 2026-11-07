@@ -359,9 +359,10 @@ impl App {
                     ui.scope(|ui| {
                         let counter_style = egui::TextStyle::Name("counter".into());
                         let style = ui.style_mut();
-                        style
-                            .text_styles
-                            .insert(counter_style.clone(), egui::FontId::proportional(LABEL_SIZE));
+                        style.text_styles.insert(
+                            counter_style.clone(),
+                            egui::FontId::proportional(LABEL_SIZE),
+                        );
                         style.drag_value_text_style = counter_style;
 
                         ui.add_sized(
