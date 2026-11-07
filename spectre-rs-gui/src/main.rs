@@ -356,12 +356,22 @@ impl App {
                     .on_hover_text("Password type");
                 ui.horizontal(|ui| {
                     password_type_selector(ui, &mut pwtype, type_width);
-                    ui.add_sized(
-                        [counter_width, FIELD_HEIGHT],
-                        egui::DragValue::new(&mut counter)
-                            .range(1..=u32::MAX)
-                            .speed(0.1),
-                    )
+                    ui.scope(|ui| {
+                        let counter_style = egui::TextStyle::Name("counter".into());
+                        let style = ui.style_mut();
+                        style
+                            .text_styles
+                            .insert(counter_style.clone(), egui::FontId::proportional(LABEL_SIZE));
+                        style.drag_value_text_style = counter_style;
+
+                        ui.add_sized(
+                            [counter_width, FIELD_HEIGHT],
+                            egui::DragValue::new(&mut counter)
+                                .range(1..=u32::MAX)
+                                .speed(0.1),
+                        )
+                    })
+                    .inner
                     .on_hover_text(
                         "Password counter. Increase it to create a new password for this site.",
                     );

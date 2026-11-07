@@ -1,5 +1,5 @@
 pkgname=spectre-rs-git
-pkgver=0.2.3.r29.gd79b36f
+pkgver=0.2.3.r30.g763212e
 pkgrel=1
 pkgdesc="Spectre-compatible password manager CLI and GUI (development version)"
 arch=('x86_64' 'aarch64')
