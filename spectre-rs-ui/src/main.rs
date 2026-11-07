@@ -1,4 +1,4 @@
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::mpsc;
 
 use egui::{Color32, RichText};
 use secstr::SecStr;
@@ -27,8 +27,13 @@ const APP_TITLE: &str = "Spectre Password Manager";
 #[derive(Debug)]
 struct App {
     input: Input,
-    shared_output: Arc<Mutex<Output>>,
-    compute_tx: mpsc::Sender<ComputeRequest>,
+    derive_tx: mpsc::Sender<DeriveRequest>,
+    derived_rx: mpsc::Receiver<DerivedKey>,
+    derivation_revision: u64,
+    user_key: Option<SecStr>,
+    site_passwd: String,
+    identicon: RichText,
+    identicon_color: Color32,
 }
 
 #[derive(Debug)]
@@ -39,11 +44,15 @@ struct Input {
     sitename: String,
 }
 
-struct ComputeRequest {
+struct DeriveRequest {
+    revision: u64,
     user: String,
-    user_secret: Option<String>,
-    sitename: String,
-    pwtype: spectre_rs::PwType,
+    user_secret: String,
+}
+
+struct DerivedKey {
+    revision: u64,
+    user_key: Option<SecStr>,
 }
 
 impl Input {
@@ -53,23 +62,6 @@ impl Input {
             user_secret: String::new(),
             sitename: String::new(),
             pwtype: spectre_rs::PwType::Medium,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-struct Output {
-    color: egui::Color32,
-    identicon: egui::RichText,
-    site_passwd: String,
-}
-
-impl Output {
-    fn new() -> Self {
-        Self {
-            color: Color32::WHITE,
-            site_passwd: String::new(),
-            identicon: egui::RichText::new(""),
         }
     }
 }
@@ -88,84 +80,34 @@ impl App {
         ));
 
         let input = Input::new();
-        let shared_output = Arc::new(Mutex::new(Output::new()));
-        let (compute_tx, compute_rx) = mpsc::channel::<ComputeRequest>();
+        let (derive_tx, derive_rx) = mpsc::channel::<DeriveRequest>();
+        let (derived_tx, derived_rx) = mpsc::channel::<DerivedKey>();
         let egui_ctx = cc.egui_ctx.clone();
+
         std::thread::spawn({
-            let shared_output = shared_output.clone();
             let egui_ctx = egui_ctx.clone();
             move || {
-                let mut user_key: Option<SecStr> = None;
-                let mut cached_user = String::new();
-                let mut identicon = RichText::new("");
-                let mut identicon_color = Color32::WHITE;
-                while let Ok(mut request) = compute_rx.recv() {
-                    // Coalesce rapid edits so expensive derivation works on the newest state.
-                    while let Ok(newer) = compute_rx.try_recv() {
-                        if newer.user_secret.is_some() {
-                            request.user_secret = newer.user_secret;
-                        }
-                        request.user = newer.user;
-                        request.sitename = newer.sitename;
-                        request.pwtype = newer.pwtype;
+                while let Ok(request) = derive_rx.recv() {
+                    // Skip queued intermediate password edits and derive only the latest input.
+                    let mut latest = request;
+                    while let Ok(newer) = derive_rx.try_recv() {
+                        latest = newer;
                     }
 
-                    if let Some(secret) = request.user_secret.take() {
-                        cached_user = request.user.clone();
-                        if request.user.is_empty() || secret.is_empty() {
-                            user_key = None;
-                            identicon = RichText::new("");
-                            identicon_color = Color32::WHITE;
-                        } else {
-                            let secret = SecStr::from(secret);
-                            user_key = Some(spectre_rs::gen_user_key(
-                                &request.user,
-                                &secret,
-                                spectre_rs::Scope::Authentication,
-                            ));
-                            let icon = spectre_rs::identicon::Identicon::from(
-                                &secret,
-                                &request.user,
-                            );
-                            if let colored::Color::TrueColor { r, g, b } =
-                                into_truecolor(icon.get_ansi_color())
-                            {
-                                identicon_color = Color32::from_rgb(r, g, b);
-                            }
-                            identicon = RichText::new(std::format!(
-                                "{}{}{}{}",
-                                icon.left_arm, icon.body, icon.right_arm, icon.accessory
-                            ))
-                            .size(20.0)
-                            .color(identicon_color);
-                        }
-                    } else if cached_user != request.user {
-                        // Username is part of the scrypt salt, so it requires a fresh key.
-                        user_key = None;
-                    }
-
-                    let mut output = Output::new();
-                    if let Some(key) = user_key.as_ref().filter(|_| !request.user.is_empty()) {
-                        if !request.sitename.is_empty() {
-                            let seed = spectre_rs::gen_site_seed(
-                                &request.sitename,
-                                key,
-                                spectre_rs::Scope::Authentication,
-                                1,
-                            );
-                            let password = spectre_rs::gen_site_password(&seed, request.pwtype);
-                            output.site_passwd = std::str::from_utf8(password.unsecure())
-                                .unwrap()
-                                .to_owned();
-                        }
-                    }
-
-                    {
-                        let mut current = shared_output.lock().unwrap();
-                        current.site_passwd = output.site_passwd;
-                        current.identicon = identicon.clone();
-                        current.color = identicon_color;
-                    }
+                    let user_key = if latest.user.is_empty() || latest.user_secret.is_empty() {
+                        None
+                    } else {
+                        let secret = SecStr::from(latest.user_secret);
+                        Some(spectre_rs::gen_user_key(
+                            &latest.user,
+                            &secret,
+                            spectre_rs::Scope::Authentication,
+                        ))
+                    };
+                    let _ = derived_tx.send(DerivedKey {
+                        revision: latest.revision,
+                        user_key,
+                    });
                     egui_ctx.request_repaint();
                 }
             }
@@ -173,19 +115,29 @@ impl App {
 
         Self {
             input,
-            shared_output,
-            compute_tx,
+            derive_tx,
+            derived_rx,
+            derivation_revision: 0,
+            user_key: None,
+            site_passwd: String::new(),
+            identicon: RichText::new(""),
+            identicon_color: Color32::WHITE,
         }
     }
 }
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        while let Ok(derived) = self.derived_rx.try_recv() {
+            if derived.revision == self.derivation_revision {
+                self.user_key = derived.user_key;
+                self.update_site_password();
+            }
+        }
+
         egui::CentralPanel::default().show(ui, |ui| {
             ui.vertical_centered(|ui| {
                 ui.add(egui::Label::new(egui::RichText::new(APP_TITLE).heading()));
-
-                let output = self.shared_output.lock().unwrap();
 
                 let username =
                     ui.add(egui::TextEdit::singleline(&mut self.input.user).hint_text("Username"));
@@ -194,8 +146,6 @@ impl eframe::App for App {
                         .password(true)
                         .hint_text("Password"),
                 );
-
-                ui.add(egui::Label::new(output.identicon.clone()));
 
                 let mut pwtype = self.input.pwtype;
                 let _cbox = egui::ComboBox::from_label("Type")
@@ -211,24 +161,67 @@ impl eframe::App for App {
                 let sitename =
                     ui.add(egui::TextEdit::singleline(&mut self.input.sitename).hint_text("Sitename"));
 
-                ui.label(&output.site_passwd);
-
                 let credentials_changed = secret.changed() || username.changed();
                 let site_changed = sitename.changed() || pwtype != self.input.pwtype;
                 if pwtype != self.input.pwtype {
                     self.input.pwtype = pwtype;
                 }
-                if credentials_changed || site_changed {
-                    let _ = self.compute_tx.send(ComputeRequest {
+                if credentials_changed {
+                    self.derivation_revision = self.derivation_revision.wrapping_add(1);
+                    self.user_key = None;
+                    self.site_passwd.clear();
+                    self.update_identicon();
+                    let _ = self.derive_tx.send(DeriveRequest {
+                        revision: self.derivation_revision,
                         user: self.input.user.clone(),
-                        user_secret: credentials_changed.then(|| self.input.user_secret.clone()),
-                        sitename: self.input.sitename.clone(),
-                        pwtype: self.input.pwtype,
+                        user_secret: self.input.user_secret.clone(),
                     });
+                } else if site_changed {
+                    self.update_site_password();
                 }
-                drop(output);
+
+                ui.add(egui::Label::new(self.identicon.clone()));
+                ui.label(&self.site_passwd);
             });
         });
+    }
+}
+
+impl App {
+    fn update_site_password(&mut self) {
+        self.site_passwd = match (&self.user_key, self.input.sitename.is_empty()) {
+            (Some(user_key), false) => {
+                let seed = spectre_rs::gen_site_seed(
+                    &self.input.sitename,
+                    user_key,
+                    spectre_rs::Scope::Authentication,
+                    1,
+                );
+                let password = spectre_rs::gen_site_password(&seed, self.input.pwtype);
+                std::str::from_utf8(password.unsecure()).unwrap().to_owned()
+            }
+            _ => String::new(),
+        };
+    }
+
+    fn update_identicon(&mut self) {
+        if self.input.user.is_empty() || self.input.user_secret.is_empty() {
+            self.identicon = RichText::new("");
+            self.identicon_color = Color32::WHITE;
+            return;
+        }
+
+        let secret = SecStr::from(self.input.user_secret.clone());
+        let icon = spectre_rs::identicon::Identicon::from(&secret, &self.input.user);
+        if let colored::Color::TrueColor { r, g, b } = into_truecolor(icon.get_ansi_color()) {
+            self.identicon_color = Color32::from_rgb(r, g, b);
+        }
+        self.identicon = RichText::new(std::format!(
+            "{}{}{}{}",
+            icon.left_arm, icon.body, icon.right_arm, icon.accessory
+        ))
+        .size(20.0)
+        .color(self.identicon_color);
     }
 }
 
