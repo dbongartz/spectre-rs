@@ -20,7 +20,8 @@ fn main() -> eframe::Result {
             .with_app_id("spectre-rs-gui")
             .with_icon(app_icon())
             .with_inner_size([440.0, 450.0])
-            .with_min_inner_size([440.0, 450.0]),
+            .with_resizable(false),
+        persist_window: false,
         ..Default::default()
     };
     eframe::run_native(
@@ -41,6 +42,7 @@ const LABEL_WIDTH: f32 = 30.0;
 const FIELD_GAP: f32 = 8.0;
 const FIELD_HEIGHT: f32 = 38.0;
 const LABEL_SIZE: f32 = 16.0;
+const USER_NAME_KEY: &str = "user_name";
 
 #[derive(Debug)]
 struct App {
@@ -53,6 +55,8 @@ struct App {
     identicon: RichText,
     identicon_color: Color32,
     copied_at: Option<Instant>,
+    last_zoom_factor: f32,
+    last_viewport_size: Option<egui::Vec2>,
 }
 
 #[derive(Debug)]
@@ -89,7 +93,9 @@ impl Input {
 
 impl App {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        cc.egui_ctx.set_zoom_factor(1.1);
+        if cc.storage.is_none() {
+            cc.egui_ctx.set_zoom_factor(1.1);
+        }
 
         #[cfg(feature = "dev-inspection")]
         attach_inspection(&cc.egui_ctx);
@@ -115,7 +121,10 @@ impl App {
             }],
         ));
 
-        let input = Input::new();
+        let mut input = Input::new();
+        if let Some(storage) = cc.storage {
+            input.user = eframe::get_value(storage, USER_NAME_KEY).unwrap_or_default();
+        }
         let (derive_tx, derived_rx) = start_key_derivation(cc.egui_ctx.clone());
 
         Self {
@@ -128,6 +137,8 @@ impl App {
             identicon: RichText::new(""),
             identicon_color: Color32::WHITE,
             copied_at: None,
+            last_zoom_factor: cc.egui_ctx.zoom_factor(),
+            last_viewport_size: None,
         }
     }
 }
@@ -195,6 +206,20 @@ fn attach_inspection(ctx: &egui::Context) {
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let viewport_size = ui.ctx().viewport_rect().size();
+        let zoom_factor = ui.ctx().zoom_factor();
+        if zoom_factor != self.last_zoom_factor {
+            let size = self
+                .last_viewport_size
+                .unwrap_or(viewport_size * (zoom_factor / self.last_zoom_factor));
+            ui.ctx()
+                .send_viewport_cmd(egui::ViewportCommand::InnerSize(size));
+            self.last_viewport_size = Some(size);
+            self.last_zoom_factor = zoom_factor;
+        } else {
+            self.last_viewport_size = Some(viewport_size);
+        }
+
         self.receive_derived_keys();
         egui::CentralPanel::default().show(ui, |ui| {
             ui.vertical_centered(|ui| {
@@ -210,6 +235,10 @@ impl eframe::App for App {
                 );
             });
         });
+    }
+
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        eframe::set_value(storage, USER_NAME_KEY, &self.input.user);
     }
 }
 
