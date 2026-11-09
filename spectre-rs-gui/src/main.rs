@@ -4,7 +4,8 @@ use std::{
 };
 
 use egui::{Color32, RichText};
-use secstr::SecStr;
+use secstr::{SecStr, SecUtf8};
+use zeroize::Zeroize;
 
 mod clipboard;
 
@@ -146,7 +147,7 @@ struct App {
     derived_rx: mpsc::Receiver<DerivedKey>,
     derivation_revision: u64,
     user_key: Option<SecStr>,
-    site_passwd: Option<SecStr>,
+    site_passwd: Option<SecUtf8>,
     identicon: String,
     identicon_color: Color32,
     show_secret: bool,
@@ -162,7 +163,6 @@ struct App {
     resize_requested_at: Option<egui::Vec2>,
 }
 
-#[derive(Debug)]
 struct Input {
     user: String,
     user_secret: String,
@@ -182,15 +182,36 @@ struct DerivedKey {
     user_key: Result<Option<SecStr>, spectre_rs_core::SpectreError>,
 }
 
+/// Room for the secret before the field has to reallocate, leaving an unwiped copy behind.
+const SECRET_CAPACITY: usize = 256;
+
 impl Input {
     fn new() -> Self {
         Self {
             user: String::new(),
-            user_secret: String::new(),
+            user_secret: String::with_capacity(SECRET_CAPACITY),
             sitename: String::new(),
             pwtype: spectre_rs_core::PwType::Medium,
             counter: 1,
         }
+    }
+}
+
+impl std::fmt::Debug for Input {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Input")
+            .field("user", &self.user)
+            .field("user_secret", &"***SECRET***")
+            .field("pwtype", &self.pwtype)
+            .field("sitename", &self.sitename)
+            .field("counter", &self.counter)
+            .finish()
+    }
+}
+
+impl Drop for Input {
+    fn drop(&mut self) {
+        self.user_secret.zeroize();
     }
 }
 
@@ -510,6 +531,7 @@ impl App {
         if field_response.clicked() {
             secret.request_focus();
         }
+        forget_undo_history(ui.ctx(), secret.id);
 
         // A square at the right end of the field; its highlight is inset evenly on all sides.
         let eye_rect = field.with_min_x(field.right() - field.height());
@@ -704,7 +726,11 @@ impl App {
         // Shrink long passwords (Maximum is 20 characters) to fit the window width.
         let full_width = ui
             .painter()
-            .layout_no_wrap(password_text.clone(), password_font(PASSWORD_SIZE), color)
+            .layout_no_wrap(
+                password_text.to_owned(),
+                password_font(PASSWORD_SIZE),
+                color,
+            )
             .size()
             .x;
         let max_width = ui.available_width() - 40.0;
@@ -721,7 +747,7 @@ impl App {
             |ui| {
                 ui.add(
                     egui::Label::new(
-                        RichText::new(&password_text)
+                        RichText::new(password_text)
                             .font(password_font(size))
                             .color(color),
                     )
@@ -747,11 +773,8 @@ impl App {
         ))
     }
 
-    fn password_text(&self) -> String {
-        self.site_passwd
-            .as_ref()
-            .map(|password| std::str::from_utf8(password.unsecure()).unwrap().to_owned())
-            .unwrap_or_else(|| "...".to_owned())
+    fn password_text(&self) -> &str {
+        self.site_passwd.as_ref().map_or("...", SecUtf8::unsecure)
     }
 
     fn show_copy_button(&mut self, ui: &mut egui::Ui) {
@@ -806,11 +829,11 @@ impl App {
             self.copy_pending = true;
             return;
         }
-        if self.site_passwd.is_none() {
+        let Some(password) = &self.site_passwd else {
             return;
-        }
+        };
         self.clipboard
-            .copy(ctx, &self.password_text(), CLIPBOARD_CLEAR_AFTER);
+            .copy(ctx, password.unsecure(), CLIPBOARD_CLEAR_AFTER);
         self.copied_at = Some(Instant::now());
     }
 
@@ -883,6 +906,16 @@ fn row_icon(ui: &mut egui::Ui, icon: &str, name: &str, hint: &str) -> egui::Resp
         .on_hover_text(hint);
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, name));
     response
+}
+
+/// Drops the undo history egui keeps for a text field, so it holds no old copies of the text.
+///
+/// Called every frame, because egui adds a snapshot whenever the text has settled for a moment.
+fn forget_undo_history(ctx: &egui::Context, id: egui::Id) {
+    if let Some(mut state) = egui::TextEdit::load_state(ctx, id) {
+        state.clear_undoer();
+        state.store(ctx, id);
+    }
 }
 
 /// Whether Enter was pressed to leave this single-line field.

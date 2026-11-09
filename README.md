@@ -16,18 +16,27 @@ This repository is organized as a Cargo workspace with:
 cargo run -p spectre-rs-cli -- --help
 ```
 
-Example:
+Example (prompts for the secret without echoing it):
 
 ```bash
-cargo run -p spectre-rs-cli -- \
-  --user-name alice \
-  --site-name github.com \
-  --secret "my secret" \
-  --pw-type long
+cargo run -p spectre-rs-cli -- --user-name alice --pw-type long github.com
 ```
+
+For scripts, pipe the secret in with `--secret-stdin` instead of passing it as an argument, where
+it would be visible in process listings and shell history.
 
 ## Notes
 
-- Secrets are read securely from a prompt by default.
-- The project uses the Master Password-style derivation scheme to generate site-specific passwords.
+- The project uses the Master Password-style derivation scheme to generate site-specific passwords,
+  and produces the same passwords as other Spectre clients.
 - It is intended as a Rust-native alternative to the original Spectre password manager.
+
+## Security
+
+- The secret and passwords never leave the machine. Only the user name is saved (by the GUI).
+- The GUI copies passwords marked as secret, so clipboard managers that honour the hint
+  (KDE's Klipper among others) leave them out of their history. It clears the clipboard after
+  30 seconds and on exit, unless something else has been copied since.
+- Keeping secrets out of memory is best-effort. The core and CLI hold them in buffers that are
+  wiped when dropped; the GUI also wipes its own copy, but its UI toolkit keeps short-lived
+  copies of what is typed and shown that it cannot wipe.

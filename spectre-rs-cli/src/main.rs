@@ -7,7 +7,7 @@ use clap::{
     builder::{Styles, styling::AnsiColor},
 };
 use rustyline::{DefaultEditor, error::ReadlineError};
-use secstr::SecStr;
+use secstr::{SecStr, SecUtf8};
 use spectre_rs_core::{get_site_password, identicon::Identicon};
 
 #[derive(Debug, Parser)]
@@ -161,11 +161,11 @@ fn generate_and_print(
 }
 
 fn print_password(
-    site_password: &SecStr,
+    site_password: &SecUtf8,
     user_secret: &SecStr,
     user_name: &str,
 ) -> Result<(), Box<dyn Error>> {
-    let pw_str = std::str::from_utf8(site_password.unsecure())?;
+    let pw_str = site_password.unsecure();
     let identicon = Identicon::from(user_secret, user_name);
 
     use std::io::IsTerminal;

@@ -1,6 +1,6 @@
 use hmac::{KeyInit, Mac};
 use scrypt::scrypt;
-use secstr::SecStr;
+use secstr::{SecStr, SecUtf8};
 
 pub type HmacSha256 = hmac::Hmac<sha2::Sha256>;
 
@@ -79,7 +79,7 @@ pub fn gen_site_seed(
     ))
 }
 
-pub fn gen_site_password(site_seed: &SecStr, pw_type: PwType) -> Result<SecStr, SpectreError> {
+pub fn gen_site_password(site_seed: &SecStr, pw_type: PwType) -> Result<SecUtf8, SpectreError> {
     let pw_type = PwType::get_template(pw_type)?;
 
     let site_seed = site_seed.unsecure();
@@ -93,17 +93,20 @@ pub fn gen_site_password(site_seed: &SecStr, pw_type: PwType) -> Result<SecStr, 
         return Err(SpectreError::InvalidSiteSeedLength);
     }
 
-    Ok(SecStr::from(
+    // Collected straight into its final allocation, so no unprotected copy is left behind.
+    let mut password = String::with_capacity(template.len());
+    password.extend(
         template
             .chars()
             .zip(site_seed.iter().skip(1))
             .map(|(tchar, &site_key)| {
                 let char_class = get_char_class(tchar);
                 let character_index = usize::from(site_key) % char_class.len();
-                char_class.as_bytes()[character_index]
-            })
-            .collect::<Vec<_>>(),
-    ))
+                // Character classes are ASCII, so a byte is a whole character.
+                char::from(char_class.as_bytes()[character_index])
+            }),
+    );
+    Ok(SecUtf8::from(password))
 }
 
 fn name_seed(
@@ -128,7 +131,7 @@ pub fn get_site_password(
     counter: u32,
     pw_type: PwType,
     purpose: Scope,
-) -> Result<SecStr, SpectreError> {
+) -> Result<SecUtf8, SpectreError> {
     let user_key = gen_user_key(user_name, user_secret, purpose)?;
     let site_seed = gen_site_seed(site_name, &user_key, purpose, counter)?;
     gen_site_password(&site_seed, pw_type)
@@ -355,8 +358,10 @@ mod tests {
 
     fn password(scope: Scope, counter: u32, pw_type: PwType) -> String {
         let seed = gen_site_seed(SITE, user_key(scope), scope, counter).unwrap();
-        let password = gen_site_password(&seed, pw_type).unwrap();
-        String::from_utf8(password.unsecure().to_vec()).unwrap()
+        gen_site_password(&seed, pw_type)
+            .unwrap()
+            .unsecure()
+            .to_owned()
     }
 
     /// The reference vectors of the Spectre / Master Password algorithm (v3). These must never
@@ -390,7 +395,7 @@ mod tests {
             Scope::Authentication,
         )
         .unwrap();
-        assert_eq!(password.unsecure(), b"Jejr5[RepuSosp");
+        assert_eq!(password.unsecure(), "Jejr5[RepuSosp");
     }
 
     /// Values pinned from this implementation, to catch accidental changes to the counter and
@@ -424,7 +429,7 @@ mod tests {
             Scope::Authentication,
         )
         .unwrap();
-        assert_eq!(password.unsecure(), b"B^eMe7cjAIHrrYcqyZ8[");
+        assert_eq!(password.unsecure(), "B^eMe7cjAIHrrYcqyZ8[");
     }
 
     #[test]

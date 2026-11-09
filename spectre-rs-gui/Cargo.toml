@@ -28,6 +28,7 @@ log = "0.4"
 arboard = { version = "3.7", default-features = false, features = ["wayland-data-control"] }
 mimalloc = "0.1.52"
 secstr = "0.5"
+zeroize = "1.8"
 wgpu = { version = "30.0", default-features = false, features = [
   "parking_lot",
   "std",
