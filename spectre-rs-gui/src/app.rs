@@ -1,17 +1,13 @@
 //! The app: its state, and the form and password it shows.
 
-use std::{
-    sync::mpsc,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 use egui::{Color32, RichText};
-use secstr::{SecStr, SecUtf8};
-use spectre_rs_core::{PwType, SpectreError, identicon::Identicon};
-use zeroize::Zeroize;
+use secstr::SecUtf8;
 
 use crate::clipboard::PasswordClipboard;
-use crate::derive::{self, DeriveRequest, DerivedKey};
+use crate::derive::KeyDeriver;
+use crate::state::{Input, Model};
 use crate::theme::{
     self, ACCENT_ACTIVE_COLOR, ACCENT_COLOR, ACCENT_HOVER_COLOR, ACCENT_TEXT_COLOR, CHIP_COLOR,
     COPIED_COLOR, COPIED_TEXT_COLOR, COPY_BUTTON_WIDTH, CORNER_RADIUS, DEFAULT_ZOOM, FIELD_GAP,
@@ -33,67 +29,19 @@ const STALE_DIM_DELAY: Duration = Duration::from_millis(250);
 const COPIED_FEEDBACK: Duration = Duration::from_secs(2);
 const CLIPBOARD_CLEAR_AFTER: Duration = Duration::from_secs(30);
 const USER_NAME_KEY: &str = "user_name";
-/// Room for the secret before the field has to reallocate, leaving an unwiped copy behind.
-const SECRET_CAPACITY: usize = 256;
 
+/// The window: the [`Model`] plus what only matters on screen.
 pub struct App {
-    input: Input,
-    derive_tx: mpsc::Sender<DeriveRequest>,
-    derived_rx: mpsc::Receiver<DerivedKey>,
-    derivation_revision: u64,
-    user_key: Option<SecStr>,
-    site_password: Option<SecUtf8>,
-    identicon: String,
-    identicon_color: Color32,
+    model: Model,
+    deriver: KeyDeriver,
+    clipboard: PasswordClipboard,
     show_secret: bool,
     /// Set when Enter is pressed in a field this frame; copies the password if there is one.
     copy_requested: bool,
-    /// When the pending user-key derivation started; `None` once the key is current.
-    deriving_since: Option<Instant>,
-    /// A copy asked for while deriving; done once the new password is ready.
-    copy_pending: bool,
+    /// When the password was last copied, for the button's "Copied" feedback.
     copied_at: Option<Instant>,
-    clipboard: PasswordClipboard,
     /// The window size when a resize was last requested; see [`App::keep_window_size`].
     resize_requested_at: Option<egui::Vec2>,
-}
-
-struct Input {
-    user_name: String,
-    user_secret: String,
-    site_name: String,
-    pw_type: PwType,
-    counter: u32,
-}
-
-impl Default for Input {
-    fn default() -> Self {
-        Self {
-            user_name: String::new(),
-            user_secret: String::with_capacity(SECRET_CAPACITY),
-            site_name: String::new(),
-            pw_type: PwType::Medium,
-            counter: 1,
-        }
-    }
-}
-
-impl std::fmt::Debug for Input {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Input")
-            .field("user_name", &self.user_name)
-            .field("user_secret", &"***SECRET***")
-            .field("site_name", &self.site_name)
-            .field("pw_type", &self.pw_type)
-            .field("counter", &self.counter)
-            .finish()
-    }
-}
-
-impl Drop for Input {
-    fn drop(&mut self) {
-        self.user_secret.zeroize();
-    }
 }
 
 impl App {
@@ -111,23 +59,14 @@ impl App {
 
         let mut input = Input::default();
         input.user_name = saved_user_name.unwrap_or_default();
-        let (derive_tx, derived_rx) = derive::start(cc.egui_ctx.clone());
 
         Self {
-            input,
-            derive_tx,
-            derived_rx,
-            derivation_revision: 0,
-            user_key: None,
-            site_password: None,
-            identicon: String::new(),
-            identicon_color: Color32::WHITE,
+            model: Model::new(input),
+            deriver: KeyDeriver::start(cc.egui_ctx.clone()),
+            clipboard: PasswordClipboard::new(),
             show_secret: false,
             copy_requested: false,
-            deriving_since: None,
-            copy_pending: false,
             copied_at: None,
-            clipboard: PasswordClipboard::new(),
             resize_requested_at: None,
         }
     }
@@ -160,7 +99,7 @@ impl eframe::App for App {
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
-        eframe::set_value(storage, USER_NAME_KEY, &self.input.user_name);
+        eframe::set_value(storage, USER_NAME_KEY, &self.model.input.user_name);
     }
 
     fn on_exit(&mut self) {
@@ -184,27 +123,9 @@ impl App {
     }
 
     fn receive_derived_keys(&mut self, ctx: &egui::Context) {
-        while let Ok(derived) = self.derived_rx.try_recv() {
-            if derived.revision != self.derivation_revision {
-                continue;
-            }
-            self.deriving_since = None;
-
-            match derived.user_key {
-                Ok(user_key) => {
-                    self.user_key = user_key;
-                    if let Err(error) = self.update_site_password() {
-                        log::error!("Failed to generate site password: {error}");
-                        self.site_password = None;
-                    }
-                }
-                Err(error) => {
-                    log::error!("Failed to derive user key: {error}");
-                    self.user_key = None;
-                    self.site_password = None;
-                }
-            }
-            if std::mem::take(&mut self.copy_pending) {
+        let results: Vec<_> = self.deriver.results().collect();
+        for derived in results {
+            if self.model.key_derived(derived) {
                 self.copy_password(ctx);
             }
         }
@@ -239,7 +160,7 @@ impl App {
         let user_name = ui
             .add_sized(
                 [field_width, FIELD_HEIGHT],
-                text_field(&mut self.input.user_name, "User"),
+                text_field(&mut self.model.input.user_name, "User"),
             )
             .labelled_by(icon.id);
         self.copy_requested |= submitted(&user_name);
@@ -270,7 +191,7 @@ impl App {
 
         let secret = ui.put(
             text_rect,
-            text_field(&mut self.input.user_secret, "Secret")
+            text_field(&mut self.model.input.user_secret, "Secret")
                 .password(!self.show_secret)
                 // A custom frame replaces `margin`, so the padding goes on the frame.
                 .frame(egui::Frame::NONE.inner_margin(egui::Margin::symmetric(FIELD_PADDING, 0))),
@@ -300,11 +221,11 @@ impl App {
             self.show_secret = !self.show_secret;
         }
 
-        if !self.identicon.is_empty() {
+        if let Some(identicon) = self.model.identicon() {
             let galley = ui.painter().layout_no_wrap(
-                self.identicon.clone(),
+                identicon.to_string(),
                 egui::FontId::proportional(IDENTICON_SIZE),
-                self.identicon_color,
+                theme::identicon_color(identicon.color),
             );
             // Same height and spacing as the eye's highlight, so the two line up.
             let chip_size = egui::vec2(
@@ -355,17 +276,17 @@ impl App {
         let site_name = ui
             .add_sized(
                 [field_width, FIELD_HEIGHT],
-                text_field(&mut self.input.site_name, "Site"),
+                text_field(&mut self.model.input.site_name, "Site"),
             )
             .labelled_by(icon.id);
         self.copy_requested |= submitted(&site_name);
-        if self.site_password.is_some() {
+        if self.model.site_password().is_some() {
             self.show_enter_hint(ui, &site_name);
         }
         ui.end_row();
 
-        let mut pw_type = self.input.pw_type;
-        let mut counter = self.input.counter;
+        let mut pw_type = self.model.input.pw_type;
+        let mut counter = self.model.input.counter;
         row_icon(
             ui,
             "\u{f1de}",
@@ -380,10 +301,11 @@ impl App {
         });
         ui.end_row();
 
-        let changed =
-            site_name.changed() || pw_type != self.input.pw_type || counter != self.input.counter;
-        self.input.pw_type = pw_type;
-        self.input.counter = counter;
+        let changed = site_name.changed()
+            || pw_type != self.model.input.pw_type
+            || counter != self.model.input.counter;
+        self.model.input.pw_type = pw_type;
+        self.model.input.counter = counter;
         changed
     }
 
@@ -400,7 +322,7 @@ impl App {
         let hint_width = glyph.size().x + gap + word.size().x;
         let name_width = painter
             .layout_no_wrap(
-                self.input.site_name.clone(),
+                self.model.input.site_name.clone(),
                 egui::FontId::proportional(TEXT_SIZE),
                 TEXT_COLOR,
             )
@@ -426,30 +348,14 @@ impl App {
 
     fn handle_input_changes(&mut self, credentials_changed: bool, site_changed: bool) {
         if credentials_changed || site_changed {
-            // A copy queued for the old input would copy the wrong password.
-            self.copy_pending = false;
             self.copied_at = None;
         }
         if credentials_changed {
-            self.derivation_revision = self.derivation_revision.wrapping_add(1);
-            // Keep showing the old password until the new key is ready, instead of flashing
-            // a placeholder on every keystroke; `deriving_since` keeps it from being copied.
-            self.user_key = None;
-            self.deriving_since.get_or_insert_with(Instant::now);
-            let secret = SecStr::from(self.input.user_secret.clone());
-            self.update_identicon(&secret);
-            let _ = self.derive_tx.send(DeriveRequest {
-                revision: self.derivation_revision,
-                user_name: self.input.user_name.clone(),
-                user_secret: secret,
-            });
-        } else if site_changed
-            && self.deriving_since.is_none()
-            && let Err(error) = self.update_site_password()
-        {
-            // While deriving, the new key recomputes the password for the new site anyway.
-            log::error!("Failed to generate site password: {error}");
-            self.site_password = None;
+            if let Some(request) = self.model.credentials_changed(Instant::now()) {
+                self.deriver.request(request);
+            }
+        } else if site_changed {
+            self.model.site_changed();
         }
     }
 
@@ -458,14 +364,14 @@ impl App {
 
         let password_text = self.password_text();
         // A stale password dims only if the new one is slow to come, so typing doesn't flicker.
-        let stale = self.deriving_since.is_some_and(|since| {
+        let stale = self.model.deriving_since().is_some_and(|since| {
             let elapsed = since.elapsed();
             if elapsed < STALE_DIM_DELAY {
                 ui.ctx().request_repaint_after(STALE_DIM_DELAY - elapsed);
             }
             elapsed >= STALE_DIM_DELAY
         });
-        let color = if self.site_password.is_some() && !stale {
+        let color = if self.model.site_password().is_some() && !stale {
             PASSWORD_COLOR
         } else {
             INACTIVE_PASSWORD_COLOR
@@ -521,11 +427,11 @@ impl App {
     }
 
     fn password_text(&self) -> &str {
-        self.site_password.as_ref().map_or("...", SecUtf8::unsecure)
+        self.model.site_password().map_or("...", SecUtf8::unsecure)
     }
 
     fn show_copy_button(&mut self, ui: &mut egui::Ui) {
-        let has_password = self.site_password.is_some();
+        let has_password = self.model.site_password().is_some();
         let copied = self
             .copied_at
             .is_some_and(|at| at.elapsed() < COPIED_FEEDBACK);
@@ -569,18 +475,14 @@ impl App {
         }
     }
 
-    /// Copies the site password, if there is one, and starts the clipboard countdown.
+    /// Copies the site password, if there is one, and starts the clipboard countdown. While
+    /// deriving, the model holds the request until the new password is ready.
     fn copy_password(&mut self, ctx: &egui::Context) {
-        if self.deriving_since.is_some() {
-            self.copy_pending = true;
-            return;
+        if let Some(password) = self.model.request_copy() {
+            self.clipboard
+                .copy(ctx, password.unsecure(), CLIPBOARD_CLEAR_AFTER);
+            self.copied_at = Some(Instant::now());
         }
-        let Some(password) = &self.site_password else {
-            return;
-        };
-        self.clipboard
-            .copy(ctx, password.unsecure(), CLIPBOARD_CLEAR_AFTER);
-        self.copied_at = Some(Instant::now());
     }
 
     /// Ctrl+C (Cmd+C on macOS) with no text selected copies the whole password.
@@ -603,36 +505,5 @@ impl App {
                 .is_some_and(|range| !range.is_empty())
         });
         !label_selected && !field_selected
-    }
-
-    fn update_site_password(&mut self) -> Result<(), SpectreError> {
-        self.site_password = match (&self.user_key, self.input.site_name.is_empty()) {
-            (Some(user_key), false) => {
-                let seed = spectre_rs_core::gen_site_seed(
-                    &self.input.site_name,
-                    user_key,
-                    spectre_rs_core::Scope::Authentication,
-                    self.input.counter,
-                )?;
-                Some(spectre_rs_core::gen_site_password(
-                    &seed,
-                    self.input.pw_type,
-                )?)
-            }
-            _ => None,
-        };
-        Ok(())
-    }
-
-    fn update_identicon(&mut self, secret: &SecStr) {
-        if self.input.user_name.is_empty() || secret.unsecure().is_empty() {
-            self.identicon.clear();
-            self.identicon_color = Color32::WHITE;
-            return;
-        }
-
-        let identicon = Identicon::new(&self.input.user_name, secret);
-        self.identicon_color = theme::identicon_color(identicon.color);
-        self.identicon = identicon.to_string();
     }
 }

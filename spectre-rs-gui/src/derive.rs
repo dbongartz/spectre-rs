@@ -3,7 +3,7 @@
 use std::sync::mpsc;
 
 use secstr::SecStr;
-use spectre_rs_core::SpectreError;
+use spectre_rs_core::{Scope, SpectreError};
 
 pub struct DeriveRequest {
     /// Echoed in the result, so results for outdated input can be told apart.
@@ -14,45 +14,52 @@ pub struct DeriveRequest {
 
 pub struct DerivedKey {
     pub revision: u64,
-    /// `None` if the user name or secret is empty.
-    pub user_key: Result<Option<SecStr>, SpectreError>,
+    pub user_key: Result<SecStr, SpectreError>,
 }
 
-/// Starts the worker thread. It runs until the returned sender is dropped, and repaints `ctx`
-/// whenever a key is ready.
-pub fn start(ctx: egui::Context) -> (mpsc::Sender<DeriveRequest>, mpsc::Receiver<DerivedKey>) {
-    let (derive_tx, derive_rx) = mpsc::channel::<DeriveRequest>();
-    let (derived_tx, derived_rx) = mpsc::channel::<DerivedKey>();
+/// The worker thread, which runs until this is dropped.
+pub struct KeyDeriver {
+    requests: mpsc::Sender<DeriveRequest>,
+    results: mpsc::Receiver<DerivedKey>,
+}
 
-    std::thread::spawn(move || {
-        while let Ok(request) = derive_rx.recv() {
-            // Skip queued intermediate password edits and derive only the latest input.
-            let mut latest = request;
-            while let Ok(newer) = derive_rx.try_recv() {
-                latest = newer;
+impl KeyDeriver {
+    /// Starts the worker; it repaints `ctx` whenever a key is ready.
+    pub fn start(ctx: egui::Context) -> Self {
+        let (requests, request_rx) = mpsc::channel::<DeriveRequest>();
+        let (result_tx, results) = mpsc::channel::<DerivedKey>();
+
+        std::thread::spawn(move || {
+            while let Ok(request) = request_rx.recv() {
+                // Skip queued intermediate edits and derive only the latest input.
+                let latest = request_rx.try_iter().last().unwrap_or(request);
+                let user_key = spectre_rs_core::gen_user_key(
+                    &latest.user_name,
+                    &latest.user_secret,
+                    Scope::Authentication,
+                );
+                let result = DerivedKey {
+                    revision: latest.revision,
+                    user_key,
+                };
+                if result_tx.send(result).is_err() {
+                    break;
+                }
+                ctx.request_repaint();
             }
+        });
 
-            let user_key = derive_user_key(&latest);
-            let _ = derived_tx.send(DerivedKey {
-                revision: latest.revision,
-                user_key,
-            });
-            ctx.request_repaint();
+        Self { requests, results }
+    }
+
+    pub fn request(&self, request: DeriveRequest) {
+        if self.requests.send(request).is_err() {
+            log::error!("The key derivation thread has stopped");
         }
-    });
+    }
 
-    (derive_tx, derived_rx)
-}
-
-fn derive_user_key(request: &DeriveRequest) -> Result<Option<SecStr>, SpectreError> {
-    if request.user_name.is_empty() || request.user_secret.unsecure().is_empty() {
-        Ok(None)
-    } else {
-        spectre_rs_core::gen_user_key(
-            &request.user_name,
-            &request.user_secret,
-            spectre_rs_core::Scope::Authentication,
-        )
-        .map(Some)
+    /// The results that have come in since the last call.
+    pub fn results(&self) -> impl Iterator<Item = DerivedKey> + '_ {
+        self.results.try_iter()
     }
 }

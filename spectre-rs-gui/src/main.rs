@@ -4,6 +4,7 @@ mod app;
 mod clipboard;
 mod derive;
 mod fonts;
+mod state;
 mod theme;
 mod widgets;
 
