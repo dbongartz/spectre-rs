@@ -9,6 +9,30 @@ use secstr::SecStr;
 #[cfg(all(feature = "dev-inspection", not(debug_assertions)))]
 compile_error!("the dev-inspection feature is only available in debug builds");
 
+/// Fonts appended to the proportional family, in fallback order.
+///
+/// egui's default fonts (without the `monochrome_emoji_fonts` feature) cover none of the
+/// identicon glyphs, so these must cover every one of them; see the test below.
+/// The two `*-Identicon` files are subsets holding only the glyphs the others lack.
+const FALLBACK_FONTS: &[(&str, &[u8])] = &[
+    (
+        "fontawesome",
+        include_bytes!("../assets/fonts/FiraMonoNerdFont-Medium.otf"),
+    ),
+    (
+        "noto_symbols2",
+        include_bytes!("../assets/fonts/NotoSansSymbols2-Regular.ttf"),
+    ),
+    (
+        "noto_symbols_identicon",
+        include_bytes!("../assets/fonts/NotoSansSymbols-Identicon.ttf"),
+    ),
+    (
+        "noto_emoji_identicon",
+        include_bytes!("../assets/fonts/NotoEmoji-Identicon.ttf"),
+    ),
+];
+
 #[global_allocator]
 static GLOBAL_ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
@@ -100,26 +124,16 @@ impl App {
         #[cfg(feature = "dev-inspection")]
         attach_inspection(&cc.egui_ctx);
 
-        cc.egui_ctx.add_font(egui::epaint::text::FontInsert::new(
-            "fontawesome",
-            egui::FontData::from_static(include_bytes!(
-                "../assets/fonts/FiraMonoNerdFont-Medium.otf"
-            )),
-            vec![egui::epaint::text::InsertFontFamily {
-                family: egui::FontFamily::Proportional,
-                priority: egui::epaint::text::FontPriority::Lowest,
-            }],
-        ));
-        cc.egui_ctx.add_font(egui::epaint::text::FontInsert::new(
-            "noto_symbols",
-            egui::FontData::from_static(include_bytes!(
-                "../assets/fonts/NotoSansSymbols2-Regular.ttf"
-            )),
-            vec![egui::epaint::text::InsertFontFamily {
-                family: egui::FontFamily::Proportional,
-                priority: egui::epaint::text::FontPriority::Lowest,
-            }],
-        ));
+        for &(name, data) in FALLBACK_FONTS {
+            cc.egui_ctx.add_font(egui::epaint::text::FontInsert::new(
+                name,
+                egui::FontData::from_static(data),
+                vec![egui::epaint::text::InsertFontFamily {
+                    family: egui::FontFamily::Proportional,
+                    priority: egui::epaint::text::FontPriority::Lowest,
+                }],
+            ));
+        }
 
         let mut input = Input::new();
         if let Some(storage) = cc.storage {
@@ -594,4 +608,36 @@ fn one_dark_ansi_color(index: u8) -> Color32 {
         .get(index as usize)
         .copied()
         .unwrap_or(Color32::from_rgb(0xab, 0xb2, 0xbf))
+}
+
+#[cfg(test)]
+mod tests {
+    use skrifa::{FontRef, MetadataProvider};
+    use spectre_rs_core::identicon::{
+        IDENTICON_ACCESSORIES, IDENTICON_BODIES, IDENTICON_LEFT_ARMS, IDENTICON_RIGHT_ARMS,
+    };
+
+    #[test]
+    fn bundled_fonts_cover_every_identicon_glyph() {
+        let fonts: Vec<FontRef> = super::FALLBACK_FONTS
+            .iter()
+            .map(|(name, data)| {
+                FontRef::new(data).unwrap_or_else(|e| panic!("cannot parse font {name}: {e}"))
+            })
+            .collect();
+
+        let missing: Vec<char> = [
+            IDENTICON_LEFT_ARMS,
+            IDENTICON_RIGHT_ARMS,
+            IDENTICON_BODIES,
+            IDENTICON_ACCESSORIES,
+        ]
+        .concat()
+        .iter()
+        .flat_map(|glyph| glyph.chars())
+        .filter(|&c| fonts.iter().all(|font| font.charmap().map(c).is_none()))
+        .collect();
+
+        assert!(missing.is_empty(), "no bundled font has: {missing:?}");
+    }
 }

@@ -261,10 +261,10 @@ pub mod identicon {
     use hmac::{KeyInit, Mac};
     use secstr::SecStr;
 
-    const IDENTICON_LEFT_ARMS: &[&str] = &["╔", "╚", "╰", "═"];
-    const IDENTICON_RIGHT_ARMS: &[&str] = &["╗", "╝", "╯", "═"];
-    const IDENTICON_BODIES: &[&str] = &["█", "░", "▒", "▓", "☺", "☻"];
-    const IDENTICON_ACCESSORIES: &[&str] = &[
+    pub const IDENTICON_LEFT_ARMS: &[&str] = &["╔", "╚", "╰", "═"];
+    pub const IDENTICON_RIGHT_ARMS: &[&str] = &["╗", "╝", "╯", "═"];
+    pub const IDENTICON_BODIES: &[&str] = &["█", "░", "▒", "▓", "☺", "☻"];
+    pub const IDENTICON_ACCESSORIES: &[&str] = &[
         "◈", "◎", "◐", "◑", "◒", "◓", "☀", "☁", "☂", "☃", "☄", "★", "☆", "☎", "☏", "⎈", "⌂", "☘",
         "☢", "☣", "☕", "⌚", "⌛", "⏰", "⚡", "⛄", "⛅", "☔", "♔", "♕", "♖", "♗", "♘", "♙",
         "♚", "♛", "♜", "♝", "♞", "♟", "♨", "♩", "♪", "♫", "⚐", "⚑", "⚔", "⚖", "⚙", "⚠", "⌘", "⏎",

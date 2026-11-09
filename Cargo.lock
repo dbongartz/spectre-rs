@@ -2835,6 +2835,7 @@ dependencies = [
  "log",
  "mimalloc",
  "secstr",
+ "skrifa",
  "spectre-rs-core",
  "wgpu",
 ]

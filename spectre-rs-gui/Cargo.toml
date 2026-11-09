@@ -30,3 +30,7 @@ wgpu = { version = "30.0", default-features = false, features = [
   "std",
   "vulkan",
 ] }
+
+[dev-dependencies]
+# Already in the tree through epaint; used to check glyph coverage of the bundled fonts.
+skrifa = "0.44"
