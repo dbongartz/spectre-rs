@@ -184,8 +184,10 @@ impl App {
     /// The text edit only covers the left part of the field, so the toggle beside it gets its
     /// clicks; the field background and focus outline are painted across the whole width.
     fn show_secret_field(&mut self, ui: &mut egui::Ui, field_width: f32) -> egui::Response {
+        // Clicks on the field's padding focus the text edit. Only `CLICK`, not `click()`: that
+        // would also make the background focusable, an invisible extra stop for Tab.
         let (field, field_response) =
-            ui.allocate_exact_size(egui::vec2(field_width, FIELD_HEIGHT), egui::Sense::click());
+            ui.allocate_exact_size(egui::vec2(field_width, FIELD_HEIGHT), egui::Sense::CLICK);
         let background = ui.painter().add(egui::Shape::Noop);
         let text_rect = field.with_max_x(field.right() - SECRET_TRAILING_WIDTH);
 

@@ -193,19 +193,6 @@ pub fn counter_stepper(ui: &mut egui::Ui, counter: &mut u32, width: f32) {
     if minus.clicked() {
         *counter = counter.saturating_sub(1).max(1);
     }
-    let plus = icon_button(
-        ui,
-        plus_rect,
-        "counter_plus",
-        "+",
-        egui::FontId::proportional(TEXT_SIZE),
-        "Next counter",
-        *counter < u32::MAX,
-    );
-    if plus.clicked() {
-        *counter = counter.saturating_add(1);
-    }
-
     ui.scope(|ui| {
         let counter_style = egui::TextStyle::Name("counter".into());
         let style = ui.style_mut();
@@ -236,6 +223,20 @@ pub fn counter_stepper(ui: &mut egui::Ui, counter: &mut u32, width: f32) {
             .on_hover_text("Counter. Drag or type to change it.");
         focus_ring(ui, &value, value_highlight, HIGHLIGHT_RADIUS);
     });
+
+    // Created after the number, so Tab visits the segments in the order they are drawn.
+    let plus = icon_button(
+        ui,
+        plus_rect,
+        "counter_plus",
+        "+",
+        egui::FontId::proportional(TEXT_SIZE),
+        "Next counter",
+        *counter < u32::MAX,
+    );
+    if plus.clicked() {
+        *counter = counter.saturating_add(1);
+    }
 
     // Dividers go on top so the hover fills of the segments don't cover them.
     let divider_y = egui::Rangef::new(rect.top() + 8.0, rect.bottom() - 8.0);
