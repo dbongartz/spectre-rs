@@ -885,12 +885,9 @@ impl App {
             return;
         }
 
-        let icon = spectre_rs_core::identicon::Identicon::from(secret, &self.input.user);
-        self.identicon_color = relaxed_identicon_color(icon.get_ansi_color());
-        self.identicon = format!(
-            "{}{}{}{}",
-            icon.left_arm, icon.body, icon.right_arm, icon.accessory
-        );
+        let icon = spectre_rs_core::identicon::Identicon::new(&self.input.user, secret);
+        self.identicon_color = relaxed_identicon_color(icon.color);
+        self.identicon = icon.to_string();
     }
 }
 
@@ -1133,53 +1130,18 @@ fn counter_stepper(ui: &mut egui::Ui, counter: &mut u32, width: f32) {
     ui.painter().vline(plus_rect.left(), divider_y, divider);
 }
 
-fn relaxed_identicon_color(color: colored::Color) -> Color32 {
-    use colored::Color::*;
+/// The identicon colors from the One Dark palette, softer than the terminal's primaries.
+fn relaxed_identicon_color(color: spectre_rs_core::identicon::IdenticonColor) -> Color32 {
+    use spectre_rs_core::identicon::IdenticonColor;
     match color {
-        Black => Color32::from_rgb(0x28, 0x2c, 0x34),
-        Red => Color32::from_rgb(0xe0, 0x6c, 0x75),
-        Green => Color32::from_rgb(0x98, 0xc3, 0x79),
-        Yellow => Color32::from_rgb(0xe5, 0xc0, 0x7b),
-        Blue => Color32::from_rgb(0x61, 0xaf, 0xef),
-        Magenta => Color32::from_rgb(0xc6, 0x78, 0xdd),
-        Cyan => Color32::from_rgb(0x56, 0xb6, 0xc2),
-        White => Color32::from_rgb(0xab, 0xb2, 0xbf),
-        BrightBlack => Color32::from_rgb(0x5c, 0x63, 0x70),
-        BrightRed => Color32::from_rgb(0xe0, 0x6c, 0x75),
-        BrightGreen => Color32::from_rgb(0x98, 0xc3, 0x79),
-        BrightYellow => Color32::from_rgb(0xe5, 0xc0, 0x7b),
-        BrightBlue => Color32::from_rgb(0x61, 0xaf, 0xef),
-        BrightMagenta => Color32::from_rgb(0xc6, 0x78, 0xdd),
-        BrightCyan => Color32::from_rgb(0x56, 0xb6, 0xc2),
-        BrightWhite => Color32::WHITE,
-        AnsiColor(index) => one_dark_ansi_color(index),
-        TrueColor { r, g, b } => Color32::from_rgb(r, g, b),
+        IdenticonColor::Red => Color32::from_rgb(0xe0, 0x6c, 0x75),
+        IdenticonColor::Green => Color32::from_rgb(0x98, 0xc3, 0x79),
+        IdenticonColor::Yellow => Color32::from_rgb(0xe5, 0xc0, 0x7b),
+        IdenticonColor::Blue => Color32::from_rgb(0x61, 0xaf, 0xef),
+        IdenticonColor::Magenta => Color32::from_rgb(0xc6, 0x78, 0xdd),
+        IdenticonColor::Cyan => Color32::from_rgb(0x56, 0xb6, 0xc2),
+        IdenticonColor::White => Color32::from_rgb(0xab, 0xb2, 0xbf),
     }
-}
-
-fn one_dark_ansi_color(index: u8) -> Color32 {
-    const PALETTE: [Color32; 16] = [
-        Color32::from_rgb(0x28, 0x2c, 0x34),
-        Color32::from_rgb(0xe0, 0x6c, 0x75),
-        Color32::from_rgb(0x98, 0xc3, 0x79),
-        Color32::from_rgb(0xe5, 0xc0, 0x7b),
-        Color32::from_rgb(0x61, 0xaf, 0xef),
-        Color32::from_rgb(0xc6, 0x78, 0xdd),
-        Color32::from_rgb(0x56, 0xb6, 0xc2),
-        Color32::from_rgb(0xab, 0xb2, 0xbf),
-        Color32::from_rgb(0x5c, 0x63, 0x70),
-        Color32::from_rgb(0xe0, 0x6c, 0x75),
-        Color32::from_rgb(0x98, 0xc3, 0x79),
-        Color32::from_rgb(0xe5, 0xc0, 0x7b),
-        Color32::from_rgb(0x61, 0xaf, 0xef),
-        Color32::from_rgb(0xc6, 0x78, 0xdd),
-        Color32::from_rgb(0x56, 0xb6, 0xc2),
-        Color32::WHITE,
-    ];
-    PALETTE
-        .get(index as usize)
-        .copied()
-        .unwrap_or(Color32::from_rgb(0xab, 0xb2, 0xbf))
 }
 
 #[cfg(test)]

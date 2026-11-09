@@ -11,7 +11,6 @@ dev-inspection = ["dep:egui_inspection"]
 [dependencies]
 spectre-rs-core = { path = "../spectre-rs-core" }
 
-colored = "3.1"
 eframe = { version = "0.37.0", default-features = false, features = [
   "default_fonts",
   "clipboard",

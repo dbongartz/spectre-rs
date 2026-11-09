@@ -1,114 +1,130 @@
+//! The Spectre (formerly Master Password) algorithm: site passwords derived from a user name, a
+//! secret and a site name, so nothing ever has to be stored.
+
 use hmac::{KeyInit, Mac};
-use scrypt::scrypt;
 use secstr::{SecStr, SecUtf8};
 
-pub type HmacSha256 = hmac::Hmac<sha2::Sha256>;
+type HmacSha256 = hmac::Hmac<sha2::Sha256>;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpectreError {
+    /// A name is longer than the 4 GiB its length prefix can describe; holds which name.
     InputTooLong(&'static str),
-    InvalidScryptParameters,
-    InvalidScryptOutputLength,
-    InvalidHmacKeyLength,
+    /// The site seed is too short for the password template it selects.
     InvalidSiteSeedLength,
-    UnsupportedPasswordType(PwType),
 }
 
 impl std::fmt::Display for SpectreError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InputTooLong(name) => write!(f, "{name} is too long"),
-            Self::InvalidScryptParameters => f.write_str("invalid scrypt parameters"),
-            Self::InvalidScryptOutputLength => f.write_str("invalid scrypt output length"),
-            Self::InvalidHmacKeyLength => f.write_str("invalid HMAC key length"),
             Self::InvalidSiteSeedLength => f.write_str("invalid site seed length"),
-            Self::UnsupportedPasswordType(pw_type) => {
-                write!(f, "password type {pw_type:?} is not supported yet")
-            }
         }
     }
 }
 
 impl std::error::Error for SpectreError {}
 
+/// Derives the user key from the user name and secret. This is the slow step (scrypt), so
+/// derive it once and reuse it for every site.
+///
+/// # Errors
+///
+/// [`SpectreError::InputTooLong`] if the user name is 4 GiB or longer.
+///
+/// # Panics
+///
+/// Never: the scrypt parameters and key length are fixed, valid constants.
 pub fn gen_user_key(
     user_name: &str,
     user_secret: &SecStr,
     scope: Scope,
 ) -> Result<SecStr, SpectreError> {
-    let seed = SecStr::new(name_seed(
-        user_name,
-        Scope::get_template(scope),
-        "user name",
-    )?);
-
-    const N: u32 = 32768;
-    const LOG2_N: u8 = u32::ilog2(N) as u8;
+    const LOG2_N: u8 = 15;
     const R: u32 = 8;
     const P: u32 = 2;
     const KEY_LEN: usize = 64;
-    let mut user_key = SecStr::new(vec![0u8; KEY_LEN]);
 
-    scrypt(
+    let salt = name_seed(user_name, scope.template(), "user name")?;
+    let params = scrypt::Params::new(LOG2_N, R, P).expect("the scrypt parameters are valid");
+    let mut user_key = SecStr::new(vec![0u8; KEY_LEN]);
+    scrypt::scrypt(
         user_secret.unsecure(),
-        seed.unsecure(),
-        &scrypt::Params::new(LOG2_N, R, P).map_err(|_| SpectreError::InvalidScryptParameters)?,
+        &salt,
+        &params,
         user_key.unsecure_mut(),
     )
-    .map_err(|_| SpectreError::InvalidScryptOutputLength)?;
+    .expect("the key length is valid for scrypt");
 
     Ok(user_key)
 }
 
+/// Derives the seed for one site from the user key.
+///
+/// # Errors
+///
+/// [`SpectreError::InputTooLong`] if the site name is 4 GiB or longer.
 pub fn gen_site_seed(
     site_name: &str,
     user_key: &SecStr,
     scope: Scope,
     counter: u32,
 ) -> Result<SecStr, SpectreError> {
-    let mut seed = name_seed(site_name, Scope::get_template(scope), "site name")?;
-    seed.extend(counter.to_be_bytes());
+    let mut message = name_seed(site_name, scope.template(), "site name")?;
+    message.extend(counter.to_be_bytes());
 
-    Ok(SecStr::from(
-        HmacSha256::new_from_slice(user_key.unsecure())
-            .map_err(|_| SpectreError::InvalidHmacKeyLength)?
-            .chain_update(seed)
-            .finalize()
-            .into_bytes()
-            .as_slice(),
-    ))
+    let seed = hmac_sha256(user_key.unsecure(), &message);
+    Ok(SecStr::from(seed.as_slice()))
 }
 
+/// Turns a site seed into a password of the given type.
+///
+/// # Errors
+///
+/// [`SpectreError::InvalidSiteSeedLength`] if `site_seed` is shorter than the template it selects.
+/// Seeds from [`gen_site_seed`] are always long enough.
 pub fn gen_site_password(site_seed: &SecStr, pw_type: PwType) -> Result<SecUtf8, SpectreError> {
-    let pw_type = PwType::get_template(pw_type)?;
+    let templates = pw_type.templates();
 
     let site_seed = site_seed.unsecure();
-    let template_index = usize::from(
-        *site_seed
-            .first()
-            .ok_or(SpectreError::InvalidSiteSeedLength)?,
-    );
-    let template = pw_type[template_index % pw_type.len()];
-    if site_seed.len() < template.len() + 1 {
+    let (&template_byte, character_bytes) = site_seed
+        .split_first()
+        .ok_or(SpectreError::InvalidSiteSeedLength)?;
+    let template = templates[usize::from(template_byte) % templates.len()];
+    if character_bytes.len() < template.len() {
         return Err(SpectreError::InvalidSiteSeedLength);
     }
 
     // Collected straight into its final allocation, so no unprotected copy is left behind.
     let mut password = String::with_capacity(template.len());
-    password.extend(
-        template
-            .chars()
-            .zip(site_seed.iter().skip(1))
-            .map(|(tchar, &site_key)| {
-                let char_class = get_char_class(tchar);
-                let character_index = usize::from(site_key) % char_class.len();
-                // Character classes are ASCII, so a byte is a whole character.
-                char::from(char_class.as_bytes()[character_index])
-            }),
-    );
+    password.extend(template.chars().zip(character_bytes).map(|(class, &byte)| {
+        let characters = char_class(class).as_bytes();
+        // Character classes are ASCII, so a byte is a whole character.
+        char::from(characters[usize::from(byte) % characters.len()])
+    }));
     Ok(SecUtf8::from(password))
 }
 
+/// Derives a site password in one go. To derive several, call [`gen_user_key`] once and
+/// [`gen_site_seed`] and [`gen_site_password`] for each, since the user key is slow to derive.
+///
+/// # Errors
+///
+/// [`SpectreError::InputTooLong`] if the user or site name is 4 GiB or longer.
+pub fn get_site_password(
+    user_name: &str,
+    user_secret: &SecStr,
+    site_name: &str,
+    counter: u32,
+    pw_type: PwType,
+    purpose: Scope,
+) -> Result<SecUtf8, SpectreError> {
+    let user_key = gen_user_key(user_name, user_secret, purpose)?;
+    let site_seed = gen_site_seed(site_name, &user_key, purpose, counter)?;
+    gen_site_password(&site_seed, pw_type)
+}
+
+/// The scope's identifier, followed by the name, prefixed by its length in bytes.
 fn name_seed(
     name: &str,
     scope_template: &[u8],
@@ -123,21 +139,16 @@ fn name_seed(
     Ok(seed)
 }
 
-/// Convenience function to generate a site password.
-pub fn get_site_password(
-    user_name: &str,
-    user_secret: &SecStr,
-    site_name: &str,
-    counter: u32,
-    pw_type: PwType,
-    purpose: Scope,
-) -> Result<SecUtf8, SpectreError> {
-    let user_key = gen_user_key(user_name, user_secret, purpose)?;
-    let site_seed = gen_site_seed(site_name, &user_key, purpose, counter)?;
-    gen_site_password(&site_seed, pw_type)
+fn hmac_sha256(key: &[u8], message: &[u8]) -> [u8; 32] {
+    HmacSha256::new_from_slice(key)
+        .expect("HMAC accepts keys of any length")
+        .chain_update(message)
+        .finalize()
+        .into_bytes()
+        .into()
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PwType {
     /// 20 characters, symbols
     Maximum,
@@ -151,17 +162,23 @@ pub enum PwType {
     Short,
     /// 4 numbers
     Pin,
-    /// 9 letter name (not supported yet)
-    Name,
-    /// 20 letter sentence (not supported yet)
-    Phrase,
-    /// 512 bit key (not supported yet)
-    Key,
-    /// saved personal password (not supported yet)
-    Personal,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+impl PwType {
+    /// The templates this type picks from; each character names a character class.
+    const fn templates(self) -> &'static [&'static str] {
+        match self {
+            Self::Maximum => templates::RESULT_TYPE_MAXIMUM,
+            Self::Long => templates::RESULT_TYPE_LONG,
+            Self::Medium => templates::RESULT_TYPE_MEDIUM,
+            Self::Basic => templates::RESULT_TYPE_BASIC,
+            Self::Short => templates::RESULT_TYPE_SHORT,
+            Self::Pin => templates::RESULT_TYPE_PIN,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Scope {
     /// An authentication token such as a password.
     Authentication,
@@ -172,8 +189,8 @@ pub enum Scope {
 }
 
 impl Scope {
-    const fn get_template(scope: Self) -> &'static [u8] {
-        match scope {
+    const fn template(self) -> &'static [u8] {
+        match self {
             Self::Authentication => templates::SCOPE_AUTHENTICATION,
             Self::Identification => templates::SCOPE_IDENTIFICATION,
             Self::Recovery => templates::SCOPE_RECOVERY,
@@ -181,7 +198,12 @@ impl Scope {
     }
 }
 
-const fn get_char_class(template: char) -> &'static str {
+/// The characters a template character stands for.
+///
+/// # Panics
+///
+/// On a character no template uses; a test checks every template.
+const fn char_class(template: char) -> &'static str {
     match template {
         'V' => templates::V,
         'C' => templates::C,
@@ -191,21 +213,8 @@ const fn get_char_class(template: char) -> &'static str {
         'a' => templates::a,
         'n' => templates::n,
         'o' => templates::o,
-        _ => templates::ALL,
-    }
-}
-
-impl PwType {
-    const fn get_template(pw_type: Self) -> Result<&'static [&'static str], SpectreError> {
-        match pw_type {
-            Self::Maximum => Ok(templates::RESULT_TYPE_MAXIMUM),
-            Self::Long => Ok(templates::RESULT_TYPE_LONG),
-            Self::Medium => Ok(templates::RESULT_TYPE_MEDIUM),
-            Self::Basic => Ok(templates::RESULT_TYPE_BASIC),
-            Self::Short => Ok(templates::RESULT_TYPE_SHORT),
-            Self::Pin => Ok(templates::RESULT_TYPE_PIN),
-            unsupported => Err(SpectreError::UnsupportedPasswordType(unsupported)),
-        }
+        'x' => templates::x,
+        _ => panic!("unknown character class in a password template"),
     }
 }
 
@@ -219,8 +228,7 @@ mod templates {
     pub const a: &str = "AEIOUaeiouBCDFGHJKLMNPQRSTVWXYZbcdfghjklmnpqrstvwxyz";
     pub const n: &str = "0123456789";
     pub const o: &str = "@&%?,=[]_:-+*$#!'^~;()/.";
-    pub const ALL: &str =
-        "AEIOUaeiouBCDFGHJKLMNPQRSTVWXYZbcdfghjklmnpqrstvwxyz0123456789!@#$%^&*()";
+    pub const x: &str = "AEIOUaeiouBCDFGHJKLMNPQRSTVWXYZbcdfghjklmnpqrstvwxyz0123456789!@#$%^&*()";
 
     pub const RESULT_TYPE_MAXIMUM: &[&str] = &["anoxxxxxxxxxxxxxxxxx", "axxxxxxxxxxxxxxxxxno"];
     pub const RESULT_TYPE_LONG: &[&str] = &[
@@ -257,11 +265,11 @@ mod templates {
 }
 
 pub mod identicon {
-    use std::fmt::Display;
+    //! A small picture derived from the user name and secret, so a typo in the secret is noticed
+    //! before it produces wrong passwords.
 
-    use crate::HmacSha256;
-    use colored::{Color, Colorize};
-    use hmac::{KeyInit, Mac};
+    use std::fmt;
+
     use secstr::SecStr;
 
     pub const IDENTICON_LEFT_ARMS: &[&str] = &["╔", "╚", "╰", "═"];
@@ -274,59 +282,63 @@ pub mod identicon {
         "✄", "✆", "✈", "✉", "✌",
     ];
 
-    #[derive(Debug)]
+    /// The identicon's color: one of the seven non-black terminal colors.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum IdenticonColor {
+        Red,
+        Green,
+        Yellow,
+        Blue,
+        Magenta,
+        Cyan,
+        White,
+    }
+
+    impl IdenticonColor {
+        const ALL: [Self; 7] = [
+            Self::Red,
+            Self::Green,
+            Self::Yellow,
+            Self::Blue,
+            Self::Magenta,
+            Self::Cyan,
+            Self::White,
+        ];
+    }
+
+    /// Displays as its four glyphs, without color.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct Identicon {
         pub left_arm: &'static str,
-        pub right_arm: &'static str,
         pub body: &'static str,
+        pub right_arm: &'static str,
         pub accessory: &'static str,
-        // Must be <= 7
-        color: u8,
+        pub color: IdenticonColor,
     }
 
     impl Identicon {
-        pub fn from(user_secret: &SecStr, name: &str) -> Self {
-            let seed = HmacSha256::new_from_slice(user_secret.unsecure())
-                .unwrap()
-                .chain_update(name.as_bytes())
-                .finalize()
-                .into_bytes();
+        #[must_use]
+        pub fn new(user_name: &str, user_secret: &SecStr) -> Self {
+            let seed = super::hmac_sha256(user_secret.unsecure(), user_name.as_bytes());
+            let pick =
+                |options: &[&'static str], byte: u8| options[usize::from(byte) % options.len()];
 
             Self {
-                left_arm: IDENTICON_LEFT_ARMS[seed[0] as usize % IDENTICON_LEFT_ARMS.len()],
-                body: IDENTICON_BODIES[seed[1] as usize % IDENTICON_BODIES.len()],
-                right_arm: IDENTICON_RIGHT_ARMS[seed[2] as usize % IDENTICON_RIGHT_ARMS.len()],
-                accessory: IDENTICON_ACCESSORIES[seed[3] as usize % IDENTICON_ACCESSORIES.len()],
-                color: seed[4] % 7 + 1,
-            }
-        }
-
-        pub fn get_ansi_color(&self) -> Color {
-            match self.color {
-                0 => Color::Black,
-                1 => Color::Red,
-                2 => Color::Green,
-                3 => Color::Yellow,
-                4 => Color::Blue,
-                5 => Color::Magenta,
-                6 => Color::Cyan,
-                7 => Color::White,
-                // <= 7 guaranteed by constructor
-                _ => unreachable!(),
+                left_arm: pick(IDENTICON_LEFT_ARMS, seed[0]),
+                body: pick(IDENTICON_BODIES, seed[1]),
+                right_arm: pick(IDENTICON_RIGHT_ARMS, seed[2]),
+                accessory: pick(IDENTICON_ACCESSORIES, seed[3]),
+                color: IdenticonColor::ALL[usize::from(seed[4]) % IdenticonColor::ALL.len()],
             }
         }
     }
 
-    impl Display for Identicon {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            let color = self.get_ansi_color();
+    impl fmt::Display for Identicon {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             write!(
                 f,
                 "{}{}{}{}",
-                self.left_arm.color(color),
-                self.body.color(color),
-                self.right_arm.color(color),
-                self.accessory.color(color)
+                self.left_arm, self.body, self.right_arm, self.accessory
             )
         }
     }
@@ -340,6 +352,14 @@ mod tests {
     const USER: &str = "Robert Lee Mitchell";
     const SECRET: &str = "banana colored duckling";
     const SITE: &str = "masterpasswordapp.com";
+    const ALL_PW_TYPES: [PwType; 6] = [
+        PwType::Maximum,
+        PwType::Long,
+        PwType::Medium,
+        PwType::Basic,
+        PwType::Short,
+        PwType::Pin,
+    ];
 
     /// scrypt is deliberately slow, so derive the shared test key once per scope.
     fn user_key(scope: Scope) -> &'static SecStr {
@@ -368,14 +388,17 @@ mod tests {
     /// change: a mismatch means every user's passwords would change.
     #[test]
     fn matches_reference_vectors() {
-        for (pw_type, expected) in [
+        let expected_passwords = [
             (PwType::Maximum, "W6@692^B1#&@gVdSdLZ@"),
             (PwType::Long, "Jejr5[RepuSosp"),
             (PwType::Medium, "Jej2$Quv"),
             (PwType::Basic, "WAo2xIg6"),
             (PwType::Short, "Jej2"),
             (PwType::Pin, "7662"),
-        ] {
+        ];
+        // Every type is covered.
+        assert_eq!(expected_passwords.map(|(pw_type, _)| pw_type), ALL_PW_TYPES);
+        for (pw_type, expected) in expected_passwords {
             assert_eq!(
                 password(Scope::Authentication, 1, pw_type),
                 expected,
@@ -434,35 +457,9 @@ mod tests {
 
     #[test]
     fn identicon_matches_reference() {
-        let identicon = identicon::Identicon::from(&SecStr::from(SECRET), USER);
-        assert_eq!(
-            [
-                identicon.left_arm,
-                identicon.body,
-                identicon.right_arm,
-                identicon.accessory
-            ]
-            .concat(),
-            "╚☻╯⛄"
-        );
-        assert_eq!(identicon.get_ansi_color(), colored::Color::Green);
-    }
-
-    #[test]
-    fn unsupported_password_types_are_rejected() {
-        let seed = gen_site_seed(
-            SITE,
-            user_key(Scope::Authentication),
-            Scope::Authentication,
-            1,
-        )
-        .unwrap();
-        for pw_type in [PwType::Name, PwType::Phrase, PwType::Key, PwType::Personal] {
-            assert!(matches!(
-                gen_site_password(&seed, pw_type),
-                Err(SpectreError::UnsupportedPasswordType(t)) if t == pw_type
-            ));
-        }
+        let identicon = identicon::Identicon::new(USER, &SecStr::from(SECRET));
+        assert_eq!(identicon.to_string(), "╚☻╯⛄");
+        assert_eq!(identicon.color, identicon::IdenticonColor::Green);
     }
 
     #[test]
@@ -478,15 +475,8 @@ mod tests {
     #[test]
     fn every_template_uses_known_character_classes() {
         let known = ['V', 'C', 'v', 'c', 'A', 'a', 'n', 'o', 'x'];
-        for templates in [
-            templates::RESULT_TYPE_MAXIMUM,
-            templates::RESULT_TYPE_LONG,
-            templates::RESULT_TYPE_MEDIUM,
-            templates::RESULT_TYPE_BASIC,
-            templates::RESULT_TYPE_SHORT,
-            templates::RESULT_TYPE_PIN,
-        ] {
-            for template in templates {
+        for pw_type in ALL_PW_TYPES {
+            for template in pw_type.templates() {
                 assert!(
                     template.chars().all(|c| known.contains(&c)),
                     "unknown class in {template:?}"

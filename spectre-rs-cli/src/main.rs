@@ -6,9 +6,13 @@ use clap::{
     Parser,
     builder::{Styles, styling::AnsiColor},
 };
+use colored::Colorize;
 use rustyline::{DefaultEditor, error::ReadlineError};
 use secstr::{SecStr, SecUtf8};
-use spectre_rs_core::{get_site_password, identicon::Identicon};
+use spectre_rs_core::{
+    get_site_password,
+    identicon::{Identicon, IdenticonColor},
+};
 
 #[derive(Debug, Parser)]
 #[clap(version, about, author, long_about = None, styles = CLAP_STYLE)]
@@ -166,16 +170,29 @@ fn print_password(
     user_name: &str,
 ) -> Result<(), Box<dyn Error>> {
     let pw_str = site_password.unsecure();
-    let identicon = Identicon::from(user_secret, user_name);
+    let identicon = Identicon::new(user_name, user_secret);
 
     use std::io::IsTerminal;
     if !std::io::stdout().is_terminal() {
         println!("{pw_str}");
     } else {
+        let identicon = identicon.to_string().color(terminal_color(identicon.color));
         println!("[ {identicon} ]: {pw_str}");
     }
 
     Ok(())
+}
+
+const fn terminal_color(color: IdenticonColor) -> colored::Color {
+    match color {
+        IdenticonColor::Red => colored::Color::Red,
+        IdenticonColor::Green => colored::Color::Green,
+        IdenticonColor::Yellow => colored::Color::Yellow,
+        IdenticonColor::Blue => colored::Color::Blue,
+        IdenticonColor::Magenta => colored::Color::Magenta,
+        IdenticonColor::Cyan => colored::Color::Cyan,
+        IdenticonColor::White => colored::Color::White,
+    }
 }
 
 fn read_prompt(editor: &mut DefaultEditor, prompt: &str) -> Result<String, Box<dyn Error>> {

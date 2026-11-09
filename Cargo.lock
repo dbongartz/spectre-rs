@@ -2806,6 +2806,7 @@ name = "spectre-rs-cli"
 version = "0.2.4"
 dependencies = [
  "clap",
+ "colored",
  "rpassword",
  "rustyline",
  "secstr",
@@ -2816,7 +2817,6 @@ dependencies = [
 name = "spectre-rs-core"
 version = "0.1.3"
 dependencies = [
- "colored",
  "hmac",
  "scrypt",
  "secstr",
@@ -2828,7 +2828,6 @@ name = "spectre-rs-gui"
 version = "0.2.4"
 dependencies = [
  "arboard",
- "colored",
  "eframe",
  "egui",
  "egui_inspection",
