@@ -30,8 +30,7 @@ prepare() {
 
 build() {
   cd "$srcdir/spectre-rs"
-  # mimalloc's GCC-LTO C archive cannot be linked by rust-lld.
-  CFLAGS="${CFLAGS//-flto=auto/}" cargo build --frozen --release --workspace
+  cargo build --frozen --release --workspace
 }
 
 package() {

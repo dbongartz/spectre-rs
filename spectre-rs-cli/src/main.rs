@@ -238,17 +238,6 @@ const CLAP_STYLE: Styles = Styles::styled()
     .literal(AnsiColor::Green.on_default())
     .placeholder(AnsiColor::Green.on_default());
 
-// Use with "help_template = HELP_TEMPLATE"
-// const HELP_TEMPLATE: &str = "\
-// {before-help}{name} {version}
-
-// {author-with-newline}
-// {about-with-newline}
-// {usage-heading} {usage}
-
-// {all-args}{after-help}
-// ";
-
 #[derive(Debug, Clone, Copy, PartialEq, clap::ValueEnum)]
 pub enum PwType {
     /// 20 characters, symbols

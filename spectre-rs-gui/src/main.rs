@@ -13,9 +13,6 @@ compile_error!("the dev-inspection feature is only available in debug builds");
 
 const APP_TITLE: &str = "Spectre Password Manager";
 
-#[global_allocator]
-static GLOBAL_ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
-
 fn main() -> eframe::Result {
     env_logger::init();
 

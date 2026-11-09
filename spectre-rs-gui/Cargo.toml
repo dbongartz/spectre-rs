@@ -26,7 +26,6 @@ log = "0.4"
 # Already in the tree through egui-winit; used directly to read the clipboard back and to
 # keep passwords out of clipboard-manager histories.
 arboard = { version = "3.7", default-features = false, features = ["wayland-data-control"] }
-mimalloc = "0.1.52"
 secstr = "0.5"
 zeroize = "1.8"
 wgpu = { version = "30.0", default-features = false, features = [
