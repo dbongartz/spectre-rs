@@ -70,7 +70,9 @@ fn main() -> eframe::Result {
         viewport: egui::ViewportBuilder::default()
             .with_app_id("spectre-rs-gui")
             .with_icon(app_icon())
-            .with_inner_size(WINDOW_SIZE * DEFAULT_ZOOM)
+            // In points: eframe scales it by the zoom restored from storage. On the first
+            // launch that is still 1.0, and `keep_window_size` corrects it on the first frame.
+            .with_inner_size(WINDOW_SIZE)
             .with_resizable(false),
         persist_window: false,
         ..Default::default()
@@ -156,8 +158,8 @@ struct App {
     copy_pending: bool,
     copied_at: Option<Instant>,
     clipboard: PasswordClipboard,
-    last_zoom_factor: f32,
-    last_viewport_size: Option<egui::Vec2>,
+    /// The window size when a resize was last requested; see [`App::keep_window_size`].
+    resize_requested_at: Option<egui::Vec2>,
 }
 
 #[derive(Debug)]
@@ -202,10 +204,6 @@ impl App {
         if saved_user.is_none() {
             cc.egui_ctx.set_zoom_factor(DEFAULT_ZOOM);
         }
-        // eframe restores a saved window geometry even with `persist_window: false`, and older
-        // builds saved one. The window isn't resizable, so always start at the designed size.
-        cc.egui_ctx
-            .send_viewport_cmd(egui::ViewportCommand::InnerSize(WINDOW_SIZE));
 
         #[cfg(feature = "dev-inspection")]
         attach_inspection(&cc.egui_ctx);
@@ -264,8 +262,7 @@ impl App {
             copy_pending: false,
             copied_at: None,
             clipboard: PasswordClipboard::new(),
-            last_zoom_factor: cc.egui_ctx.zoom_factor(),
-            last_viewport_size: Some(WINDOW_SIZE),
+            resize_requested_at: None,
         }
     }
 }
@@ -370,20 +367,7 @@ fn attach_inspection(ctx: &egui::Context) {
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        let viewport_size = ui.ctx().viewport_rect().size();
-        let zoom_factor = ui.ctx().zoom_factor();
-        if zoom_factor != self.last_zoom_factor {
-            let size = self
-                .last_viewport_size
-                .unwrap_or(viewport_size * (zoom_factor / self.last_zoom_factor));
-            ui.ctx()
-                .send_viewport_cmd(egui::ViewportCommand::InnerSize(size));
-            self.last_viewport_size = Some(size);
-            self.last_zoom_factor = zoom_factor;
-        } else {
-            self.last_viewport_size = Some(viewport_size);
-        }
-
+        self.keep_window_size(ui.ctx());
         self.receive_derived_keys(ui.ctx());
         self.clipboard.clear_when_due(ui.ctx());
         self.copy_requested = false;
@@ -417,6 +401,20 @@ impl eframe::App for App {
 }
 
 impl App {
+    /// Keeps the window at [`WINDOW_SIZE`] points, so it grows and shrinks with the zoom
+    /// instead of reflowing the fixed layout.
+    ///
+    /// Asks again only once the size has changed since the last request: requests made before
+    /// the window is mapped get lost and must be repeated, but a window manager that won't
+    /// resize the window (a tiling one, say) mustn't be asked on every frame.
+    fn keep_window_size(&mut self, ctx: &egui::Context) {
+        let size = ctx.viewport_rect().size();
+        if (size - WINDOW_SIZE).abs().max_elem() > 0.5 && self.resize_requested_at != Some(size) {
+            self.resize_requested_at = Some(size);
+            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(WINDOW_SIZE));
+        }
+    }
+
     fn receive_derived_keys(&mut self, ctx: &egui::Context) {
         while let Ok(derived) = self.derived_rx.try_recv() {
             if derived.revision != self.derivation_revision {
