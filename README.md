@@ -2,7 +2,7 @@
 
 A Rust implementation of the Spectre password generator, inspired by the original Master Password algorithm.
 
-<img width="436" alt="The spectre-rs GUI showing a derived password for masterpasswordapp.com" src="docs/screenshot.png" />
+<img width="473" alt="The spectre-rs GUI showing a derived password for github.com" src="docs/screenshot.png" />
 
 This repository is organized as a Cargo workspace with:
 
