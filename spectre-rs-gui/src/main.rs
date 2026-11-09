@@ -6,6 +6,10 @@ use std::{
 use egui::{Color32, RichText};
 use secstr::SecStr;
 
+mod clipboard;
+
+use clipboard::PasswordClipboard;
+
 #[cfg(all(feature = "dev-inspection", not(debug_assertions)))]
 compile_error!("the dev-inspection feature is only available in debug builds");
 
@@ -134,7 +138,6 @@ const ACCENT_HOVER_COLOR: Color32 = Color32::from_rgb(0x35, 0x7a, 0xb4);
 const ACCENT_ACTIVE_COLOR: Color32 = Color32::from_rgb(0x24, 0x5d, 0x8d);
 const ACCENT_TEXT_COLOR: Color32 = Color32::WHITE;
 
-#[derive(Debug)]
 struct App {
     input: Input,
     derive_tx: mpsc::Sender<DeriveRequest>,
@@ -152,7 +155,7 @@ struct App {
     /// A copy asked for while deriving; done once the new password is ready.
     copy_pending: bool,
     copied_at: Option<Instant>,
-    clipboard_clear_at: Option<Instant>,
+    clipboard: PasswordClipboard,
     last_zoom_factor: f32,
     last_viewport_size: Option<egui::Vec2>,
 }
@@ -191,7 +194,12 @@ impl Input {
 
 impl App {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        if cc.storage.is_none() {
+        let saved_user = cc
+            .storage
+            .and_then(|storage| eframe::get_value::<String>(storage, USER_NAME_KEY));
+        // Nothing saved yet means this is the first launch. Later launches keep the zoom the
+        // user chose, which egui restores on its own.
+        if saved_user.is_none() {
             cc.egui_ctx.set_zoom_factor(DEFAULT_ZOOM);
         }
         // eframe restores a saved window geometry even with `persist_window: false`, and older
@@ -238,9 +246,7 @@ impl App {
         }
 
         let mut input = Input::new();
-        if let Some(storage) = cc.storage {
-            input.user = eframe::get_value(storage, USER_NAME_KEY).unwrap_or_default();
-        }
+        input.user = saved_user.unwrap_or_default();
         let (derive_tx, derived_rx) = start_key_derivation(cc.egui_ctx.clone());
 
         Self {
@@ -257,7 +263,7 @@ impl App {
             deriving_since: None,
             copy_pending: false,
             copied_at: None,
-            clipboard_clear_at: None,
+            clipboard: PasswordClipboard::new(),
             last_zoom_factor: cc.egui_ctx.zoom_factor(),
             last_viewport_size: Some(WINDOW_SIZE),
         }
@@ -379,7 +385,7 @@ impl eframe::App for App {
         }
 
         self.receive_derived_keys(ui.ctx());
-        self.clear_clipboard_when_due(ui.ctx());
+        self.clipboard.clear_when_due(ui.ctx());
         self.copy_requested = false;
         egui::CentralPanel::default().show(ui, |ui| {
             ui.vertical_centered(|ui| {
@@ -403,6 +409,10 @@ impl eframe::App for App {
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, USER_NAME_KEY, &self.input.user);
+    }
+
+    fn on_exit(&mut self) {
+        self.clipboard.clear_on_exit();
     }
 }
 
@@ -431,21 +441,6 @@ impl App {
             if std::mem::take(&mut self.copy_pending) {
                 self.copy_password(ctx);
             }
-        }
-    }
-
-    /// Wipes the clipboard once the copied password has been there for [`CLIPBOARD_CLEAR_AFTER`].
-    fn clear_clipboard_when_due(&mut self, ctx: &egui::Context) {
-        let Some(clear_at) = self.clipboard_clear_at else {
-            return;
-        };
-        let now = Instant::now();
-        if now >= clear_at {
-            ctx.copy_text(String::new());
-            self.clipboard_clear_at = None;
-        } else {
-            // Repaint each second for the countdown, and exactly when the clipboard is due.
-            ctx.request_repaint_after((clear_at - now).min(Duration::from_secs(1)));
         }
     }
 
@@ -746,9 +741,7 @@ impl App {
 
     /// The countdown until the clipboard is wiped, while one is running.
     fn clipboard_hint(&self) -> Option<String> {
-        let remaining = self
-            .clipboard_clear_at?
-            .saturating_duration_since(Instant::now());
+        let remaining = self.clipboard.remaining()?;
         // Round up, so the countdown reads 30 right after copying and 1 just before clearing.
         Some(format!(
             "Clipboard clears in {} s",
@@ -818,11 +811,9 @@ impl App {
         if self.site_passwd.is_none() {
             return;
         }
-        ctx.copy_text(self.password_text());
-        let now = Instant::now();
-        self.copied_at = Some(now);
-        self.clipboard_clear_at = Some(now + CLIPBOARD_CLEAR_AFTER);
-        ctx.request_repaint_after(Duration::from_secs(1));
+        self.clipboard
+            .copy(ctx, &self.password_text(), CLIPBOARD_CLEAR_AFTER);
+        self.copied_at = Some(Instant::now());
     }
 
     /// Ctrl+C (Cmd+C on macOS) with no text selected copies the whole password.

@@ -2827,6 +2827,7 @@ dependencies = [
 name = "spectre-rs-gui"
 version = "0.2.4"
 dependencies = [
+ "arboard",
  "colored",
  "eframe",
  "egui",
