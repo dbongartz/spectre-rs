@@ -2785,7 +2785,7 @@ dependencies = [
 
 [[package]]
 name = "spectre-rs-cli"
-version = "0.2.4"
+version = "0.3.0"
 dependencies = [
  "clap",
  "colored",
@@ -2797,7 +2797,7 @@ dependencies = [
 
 [[package]]
 name = "spectre-rs-core"
-version = "0.1.3"
+version = "0.2.0"
 dependencies = [
  "hmac",
  "scrypt",
@@ -2807,7 +2807,7 @@ dependencies = [
 
 [[package]]
 name = "spectre-rs-gui"
-version = "0.2.4"
+version = "0.3.0"
 dependencies = [
  "arboard",
  "eframe",

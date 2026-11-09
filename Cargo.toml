@@ -3,7 +3,7 @@ members = ["spectre-rs-core", "spectre-rs-cli", "spectre-rs-gui"]
 resolver = "3"
 
 [workspace.package]
-version = "0.2.4"
+version = "0.3.0"
 license = "MIT OR Apache-2.0"
 
 [profile.release]
