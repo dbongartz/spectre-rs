@@ -1,5 +1,6 @@
 use std::error::Error;
 use std::io::{self, BufRead};
+use std::process::ExitCode;
 
 use clap::{
     Parser,
@@ -43,10 +44,38 @@ struct Args {
     site_name: Option<String>,
 }
 
-fn main() {
-    if let Err(error) = run() {
-        eprintln!("Error: {error}");
-        std::process::exit(1);
+/// Exit status after Ctrl-C at a prompt, as if the shell had seen the interrupt itself.
+const EXIT_INTERRUPTED: u8 = 130;
+
+/// The user cancelled a prompt: Ctrl-C, or Ctrl-D before any input.
+#[derive(Debug)]
+enum Cancelled {
+    Interrupted,
+    EndOfInput,
+}
+
+impl std::fmt::Display for Cancelled {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Interrupted => f.write_str("interrupted"),
+            Self::EndOfInput => f.write_str("no input"),
+        }
+    }
+}
+
+impl Error for Cancelled {}
+
+fn main() -> ExitCode {
+    match run() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => match error.downcast_ref::<Cancelled>() {
+            // The prompt already ended its line; there is nothing more to say.
+            Some(Cancelled::Interrupted) => ExitCode::from(EXIT_INTERRUPTED),
+            Some(Cancelled::EndOfInput) | None => {
+                eprintln!("Error: {error}");
+                ExitCode::FAILURE
+            }
+        },
     }
 }
 
@@ -60,19 +89,19 @@ fn run() -> Result<(), Box<dyn Error>> {
         counter,
         purpose,
     } = Args::parse();
-    let mut editor = DefaultEditor::new()?;
 
-    let Some(user_name) = read_name(&mut editor, provided_user_name, "Enter user name: ", "User")?
-    else {
-        return Ok(());
-    };
-    let Some(site_name) = read_name(&mut editor, provided_site_name, "Enter site name: ", "Site")?
-    else {
-        return Ok(());
-    };
-    let Some(user_secret) = read_user_secret(secret, secret_stdin)? else {
-        return Ok(());
-    };
+    // Prompting would read the names from the same stdin the secret is piped through.
+    if secret_stdin && (provided_user_name.is_none() || provided_site_name.is_none()) {
+        return Err("--secret-stdin needs the user name and site name as arguments".into());
+    }
+
+    let mut editor = DefaultEditor::new()?;
+    let user_name = read_name(&mut editor, provided_user_name, "Enter user name: ", "User")?;
+    let site_name = read_name(&mut editor, provided_site_name, "Enter site name: ", "Site")?;
+    let user_secret = read_user_secret(secret, secret_stdin)?;
+    if user_secret.unsecure().is_empty() {
+        return Err("secret cannot be empty".into());
+    }
 
     generate_and_print(
         &user_name,
@@ -84,34 +113,28 @@ fn run() -> Result<(), Box<dyn Error>> {
     )
 }
 
+/// Returns the name as given, without trimming: whitespace is part of the name, as in every
+/// other Spectre client, so trimming it would derive different passwords.
 fn read_name(
     editor: &mut DefaultEditor,
     provided_name: Option<String>,
     prompt: &str,
     name_kind: &str,
-) -> Result<Option<String>, Box<dyn Error>> {
+) -> Result<String, Box<dyn Error>> {
     let name = match provided_name {
         Some(name) => name,
-        None => match read_prompt(editor, prompt)? {
-            Some(name) => name,
-            None => return Ok(None),
-        },
-    }
-    .trim()
-    .to_owned();
-
-    if name.is_empty() {
+        None => read_prompt(editor, prompt)?,
+    };
+    if name.trim().is_empty() {
         return Err(format!("{name_kind} name cannot be empty").into());
     }
-
-    u32::try_from(name.len()).map_err(|_| format!("{name_kind} name too long"))?;
-    Ok(Some(name))
+    Ok(name)
 }
 
-fn read_user_secret(secret: Option<SecStr>, secret_stdin: bool) -> io::Result<Option<SecStr>> {
+fn read_user_secret(secret: Option<SecStr>, secret_stdin: bool) -> Result<SecStr, Box<dyn Error>> {
     match (secret, secret_stdin) {
-        (Some(secret), _) => Ok(Some(secret)),
-        (None, true) => read_secret_stdin().map(Some),
+        (Some(secret), _) => Ok(secret),
+        (None, true) => Ok(read_secret_stdin()?),
         (None, false) => read_secret(),
     }
 }
@@ -155,30 +178,27 @@ fn print_password(
     Ok(())
 }
 
-fn read_prompt(editor: &mut DefaultEditor, prompt: &str) -> Result<Option<String>, ReadlineError> {
+fn read_prompt(editor: &mut DefaultEditor, prompt: &str) -> Result<String, Box<dyn Error>> {
     match editor.readline(prompt) {
-        Ok(input) => Ok(Some(input.trim().to_string())),
-        Err(ReadlineError::Interrupted | ReadlineError::Eof) => Ok(None),
-        Err(error) => Err(error),
+        Ok(input) => Ok(input),
+        Err(ReadlineError::Interrupted) => Err(Cancelled::Interrupted.into()),
+        Err(ReadlineError::Eof) => Err(Cancelled::EndOfInput.into()),
+        Err(error) => Err(error.into()),
     }
 }
 
-fn read_secret() -> io::Result<Option<SecStr>> {
+fn read_secret() -> Result<SecStr, Box<dyn Error>> {
     let config = rpassword::ConfigBuilder::new()
         .password_feedback_mask('*')
         .build();
 
     match rpassword::prompt_password_with_config("Enter secret: ", config) {
-        Ok(secret) => Ok(Some(SecStr::from(secret))),
-        Err(error)
-            if matches!(
-                error.kind(),
-                io::ErrorKind::Interrupted | io::ErrorKind::UnexpectedEof
-            ) =>
-        {
-            Ok(None)
-        }
-        Err(error) => Err(error),
+        Ok(secret) => Ok(SecStr::from(secret)),
+        Err(error) => match error.kind() {
+            io::ErrorKind::Interrupted => Err(Cancelled::Interrupted.into()),
+            io::ErrorKind::UnexpectedEof => Err(Cancelled::EndOfInput.into()),
+            _ => Err(error.into()),
+        },
     }
 }
 
