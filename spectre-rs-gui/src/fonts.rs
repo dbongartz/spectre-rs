@@ -3,16 +3,32 @@
 use egui::epaint::text::{FontInsert, FontPriority, InsertFontFamily};
 
 /// Fira Mono Medium: a dotted zero and distinct `l`/`1`/`I`, so passwords read unambiguously.
-/// Also the first proportional fallback, for the icon glyphs it carries.
-const FIRA_MONO_MEDIUM: &[u8] = include_bytes!("../assets/fonts/FiraMonoNerdFont-Medium.otf");
+/// Also the first proportional fallback, for the identicon glyphs it carries. Subset to
+/// everything but the Nerd Font icons; see `assets/fonts/README.md`.
+const FIRA_MONO_MEDIUM: &[u8] = include_bytes!("../assets/fonts/FiraMonoNerdFont-Medium-Text.otf");
 const PASSWORD_FAMILY: &str = "password";
 
 /// Nerd Font with proportional icon widths. The monospace variant squeezes icons into one cell
-/// and lets them overflow it, which puts them visibly off-center.
+/// and lets them overflow it, which puts them visibly off-center. Subset to the [`icons`] below.
 const ICON_FONT: (&str, &[u8]) = (
     "icons",
-    include_bytes!("../assets/fonts/FiraMonoNerdFontPropo-Medium.otf"),
+    include_bytes!("../assets/fonts/FiraMonoNerdFontPropo-Medium-Icons.otf"),
 );
+
+/// The glyphs drawn with [`icon`]. The icon font holds only these, so a new one must be added
+/// to its subset too; a test checks that it is.
+pub mod icons {
+    pub const USER: &str = "\u{f007}";
+    pub const KEY: &str = "\u{f084}";
+    pub const GLOBE: &str = "\u{f0ac}";
+    pub const SLIDERS: &str = "\u{f1de}";
+    pub const EYE: &str = "\u{f06e}";
+    pub const EYE_SLASH: &str = "\u{f070}";
+    pub const RETURN: &str = "\u{23ce}";
+
+    #[cfg(test)]
+    pub const ALL: [&str; 7] = [USER, KEY, GLOBE, SLIDERS, EYE, EYE_SLASH, RETURN];
+}
 
 /// UI text font, subset to Latin; anything else falls back to egui's default fonts.
 const TEXT_FONT: (&str, &[u8]) = (
@@ -90,6 +106,30 @@ mod tests {
     use spectre_rs_core::identicon::{
         IDENTICON_ACCESSORIES, IDENTICON_BODIES, IDENTICON_LEFT_ARMS, IDENTICON_RIGHT_ARMS,
     };
+
+    fn missing_chars(font: &[u8], chars: impl IntoIterator<Item = char>) -> Vec<char> {
+        let font = FontRef::new(font).unwrap();
+        chars
+            .into_iter()
+            .filter(|&c| font.charmap().map(c).is_none())
+            .collect()
+    }
+
+    #[test]
+    fn icon_font_covers_every_icon() {
+        let missing = missing_chars(
+            super::ICON_FONT.1,
+            super::icons::ALL.iter().flat_map(|icon| icon.chars()),
+        );
+        assert!(missing.is_empty(), "the icon font lacks: {missing:?}");
+    }
+
+    /// Every character a password can contain is printable ASCII.
+    #[test]
+    fn password_font_covers_printable_ascii() {
+        let missing = missing_chars(super::FIRA_MONO_MEDIUM, ' '..='~');
+        assert!(missing.is_empty(), "the password font lacks: {missing:?}");
+    }
 
     #[test]
     fn bundled_fonts_cover_every_identicon_glyph() {

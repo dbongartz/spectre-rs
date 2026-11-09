@@ -153,7 +153,7 @@ impl App {
     fn show_credential_fields(&mut self, ui: &mut egui::Ui, field_width: f32) -> bool {
         let icon = row_icon(
             ui,
-            "\u{f007}",
+            fonts::icons::USER,
             "User",
             "Name used to derive your passwords. Keep it consistent across devices.",
         );
@@ -168,7 +168,7 @@ impl App {
 
         let icon = row_icon(
             ui,
-            "\u{f084}",
+            fonts::icons::KEY,
             "Secret",
             "Your master secret, used locally to derive your account key.",
         );
@@ -204,9 +204,9 @@ impl App {
         // A square at the right end of the field; its highlight is inset evenly on all sides.
         let eye_rect = field.with_min_x(field.right() - field.height());
         let (eye_icon, eye_hint) = if self.show_secret {
-            ("\u{f070}", "Hide secret")
+            (fonts::icons::EYE_SLASH, "Hide secret")
         } else {
-            ("\u{f06e}", "Show secret")
+            (fonts::icons::EYE, "Show secret")
         };
         let eye = icon_button(
             ui,
@@ -269,7 +269,7 @@ impl App {
     fn show_site_fields(&mut self, ui: &mut egui::Ui, field_width: f32) -> bool {
         let icon = row_icon(
             ui,
-            "\u{f0ac}",
+            fonts::icons::GLOBE,
             "Site",
             "The site or service this password is for. Press Enter to copy the password.",
         );
@@ -289,7 +289,7 @@ impl App {
         let mut counter = self.model.input.counter;
         row_icon(
             ui,
-            "\u{f1de}",
+            fonts::icons::SLIDERS,
             "Password settings",
             "Password type, and a counter to bump when a site needs a new password.",
         );
@@ -312,7 +312,11 @@ impl App {
     /// A muted "⏎ copy" at the right end of the site field, unless the site name reaches it.
     fn show_enter_hint(&self, ui: &egui::Ui, field: &egui::Response) {
         let painter = ui.painter();
-        let glyph = painter.layout_no_wrap("\u{23ce}".into(), fonts::icon(ICON_SIZE), ICON_COLOR);
+        let glyph = painter.layout_no_wrap(
+            fonts::icons::RETURN.into(),
+            fonts::icon(ICON_SIZE),
+            ICON_COLOR,
+        );
         let word = painter.layout_no_wrap(
             "copy".into(),
             egui::FontId::proportional(HINT_SIZE),
