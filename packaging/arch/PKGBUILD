@@ -4,7 +4,7 @@ pkgrel=1
 pkgdesc="Spectre-compatible password manager CLI and GUI (development version)"
 arch=('x86_64' 'aarch64')
 url="https://github.com/dbongartz/spectre-rs"
-license=('unknown')
+license=('MIT OR Apache-2.0' 'OFL-1.1')
 depends=('gcc-libs' 'vulkan-icd-loader' 'wayland')
 makedepends=('cargo' 'git' 'jq')
 source=("git+https://github.com/dbongartz/spectre-rs.git#branch=main")
@@ -43,4 +43,7 @@ package() {
     "$pkgdir/usr/share/applications/spectre-rs-gui.desktop"
   install -Dm644 packaging/linux/hicolor/scalable/apps/spectre-rs-gui.svg \
     "$pkgdir/usr/share/icons/hicolor/scalable/apps/spectre-rs-gui.svg"
+  # The fonts embedded in the GUI must ship with their licenses.
+  install -Dm644 -t "$pkgdir/usr/share/licenses/$pkgname" \
+    LICENSE-MIT LICENSE-APACHE spectre-rs-gui/assets/fonts/*-OFL.txt
 }

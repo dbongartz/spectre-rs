@@ -40,3 +40,19 @@ it would be visible in process listings and shell history.
 - Keeping secrets out of memory is best-effort. The core and CLI hold them in buffers that are
   wiped when dropped; the GUI also wipes its own copy, but its UI toolkit keeps short-lived
   copies of what is typed and shown that it cannot wipe.
+
+## License
+
+Licensed under either of
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
+- MIT license ([LICENSE-MIT](LICENSE-MIT))
+
+at your option.
+
+The fonts bundled with the GUI are licensed under the SIL Open Font License 1.1; see
+[spectre-rs-gui/assets/fonts](spectre-rs-gui/assets/fonts/README.md).
+
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in
+this project by you, as defined in the Apache-2.0 license, shall be dual licensed as above,
+without any additional terms or conditions.

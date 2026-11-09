@@ -78,6 +78,15 @@ jobs:
       contents: write
 
     steps:
+      - uses: actions/checkout@v7
+
+      # The fonts embedded in the GUI must ship with their licenses.
+      - name: Bundle licenses
+        run: |
+          mkdir -p dist licenses
+          cp LICENSE-MIT LICENSE-APACHE spectre-rs-gui/assets/fonts/*-OFL.txt licenses/
+          zip -r "dist/spectre-rs-${GITHUB_REF_NAME}-licenses.zip" licenses
+
       - name: Download executables
         uses: actions/download-artifact@v7
         with:
