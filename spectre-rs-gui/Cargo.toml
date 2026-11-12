@@ -27,7 +27,7 @@ log = "0.4"
 # keep passwords out of clipboard-manager histories.
 arboard = { version = "3.7", default-features = false, features = ["wayland-data-control"] }
 secstr = "0.5"
-zeroize = "1.8"
+zeroize = "1.9"
 wgpu = { version = "30.0", default-features = false, features = [
   "parking_lot",
   "std",
@@ -36,4 +36,4 @@ wgpu = { version = "30.0", default-features = false, features = [
 
 [dev-dependencies]
 # Already in the tree through epaint; used to check glyph coverage of the bundled fonts.
-skrifa = "0.44"
+skrifa = "0.50"
