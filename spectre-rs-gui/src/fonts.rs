@@ -25,9 +25,23 @@ pub mod icons {
     pub const EYE: &str = "\u{f06e}";
     pub const EYE_SLASH: &str = "\u{f070}";
     pub const RETURN: &str = "\u{23ce}";
+    pub const SUN: &str = "\u{e30d}";
+    pub const MOON: &str = "\u{f186}";
+    pub const CIRCLE_HALF: &str = "\u{f042}";
 
     #[cfg(test)]
-    pub const ALL: [&str; 7] = [USER, KEY, GLOBE, SLIDERS, EYE, EYE_SLASH, RETURN];
+    pub const ALL: [&str; 10] = [
+        USER,
+        KEY,
+        GLOBE,
+        SLIDERS,
+        EYE,
+        EYE_SLASH,
+        RETURN,
+        SUN,
+        MOON,
+        CIRCLE_HALF,
+    ];
 }
 
 /// UI text font, subset to Latin; anything else falls back to egui's default fonts.

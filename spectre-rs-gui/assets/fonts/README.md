@@ -14,8 +14,9 @@ still cover every glyph the app draws.
 | `NotoSansSymbols-Identicon.ttf` | [Noto Sans Symbols](https://github.com/notofonts/symbols) Regular, only the identicon glyphs no other font here has | `NotoSansSymbols-OFL.txt` |
 | `NotoEmoji-Identicon.ttf` | [Noto Emoji](https://github.com/googlefonts/noto-emoji) (monochrome), only the identicon glyphs no other font here has | `NotoEmoji-OFL.txt` |
 
-The icons in the Nerd Font files come from [Font Awesome](https://fontawesome.com) 4, whose font is
-also licensed under the SIL Open Font License 1.1.
+The icons in the Nerd Font files come from [Font Awesome](https://fontawesome.com) 4, except the sun,
+which comes from [Weather Icons](https://erikflowers.github.io/weather-icons/). Both fonts are also
+licensed under the SIL Open Font License 1.1.
 
 ## Making the Fira Mono subsets
 
@@ -31,7 +32,7 @@ pyftsubset FiraMonoNerdFont-Medium.otf \
 
 # Only the icons in `fonts::icons`; add a code point here when adding an icon there.
 pyftsubset FiraMonoNerdFontPropo-Medium.otf \
-  --unicodes='U+23CE,U+F007,U+F06E,U+F070,U+F084,U+F0AC,U+F1DE' \
+  --unicodes='U+23CE,U+E30D,U+F007,U+F042,U+F06E,U+F070,U+F084,U+F0AC,U+F186,U+F1DE' \
   --name-IDs='*' --name-languages='*' --notdef-outline \
   --output-file=FiraMonoNerdFontPropo-Medium-Icons.otf
 ```

@@ -9,12 +9,10 @@ use crate::clipboard::PasswordClipboard;
 use crate::derive::KeyDeriver;
 use crate::state::{Input, Model};
 use crate::theme::{
-    self, ACCENT_ACTIVE_COLOR, ACCENT_COLOR, ACCENT_HOVER_COLOR, ACCENT_TEXT_COLOR, CHIP_COLOR,
-    COPIED_COLOR, COPIED_TEXT_COLOR, COPY_BUTTON_WIDTH, CORNER_RADIUS, DEFAULT_ZOOM, FIELD_GAP,
-    FIELD_HEIGHT, FIELD_PADDING, FIELD_WIDTH, HIGHLIGHT_INSET, HIGHLIGHT_RADIUS, HINT_SIZE,
-    ICON_COLOR, ICON_SIZE, IDENTICON_CHIP_MIN_WIDTH, IDENTICON_SIZE, INACTIVE_PASSWORD_COLOR,
-    LABEL_WIDTH, MUTED_TEXT_COLOR, PASSWORD_COLOR, PASSWORD_MARGIN, PASSWORD_SIZE, ROW_GAP,
-    SECRET_TRAILING_WIDTH, TEXT_COLOR, TEXT_SIZE, TYPE_WIDTH, VERSION_COLOR, WINDOW_SIZE,
+    self, COPY_BUTTON_WIDTH, CORNER_RADIUS, DEFAULT_ZOOM, FIELD_GAP, FIELD_HEIGHT, FIELD_PADDING,
+    FIELD_WIDTH, HIGHLIGHT_INSET, HIGHLIGHT_RADIUS, HINT_SIZE, ICON_SIZE, IDENTICON_CHIP_MIN_WIDTH,
+    IDENTICON_SIZE, LABEL_WIDTH, PASSWORD_MARGIN, PASSWORD_SIZE, ROW_GAP, SECRET_TRAILING_WIDTH,
+    TEXT_SIZE, THEME_BUTTON_SIZE, TYPE_WIDTH, WINDOW_SIZE, colors,
 };
 use crate::widgets::{
     counter_stepper, focus_ring, forget_undo_history, icon_button, password_type_selector,
@@ -83,14 +81,7 @@ impl eframe::App for App {
                 self.show_form(ui);
                 self.show_password(ui);
             });
-            ui.with_layout(egui::Layout::bottom_up(egui::Align::Max), |ui| {
-                ui.label(
-                    RichText::new(format!("v{APP_VERSION}"))
-                        .size(HINT_SIZE - 1.0)
-                        .color(VERSION_COLOR),
-                )
-                .on_hover_text(APP_TITLE);
-            });
+            show_footer(ui);
         });
         // Checked after the widgets ran, so a selection they copied this frame takes precedence.
         if self.copy_shortcut_pressed(ui.ctx()) {
@@ -151,6 +142,7 @@ impl App {
     }
 
     fn show_credential_fields(&mut self, ui: &mut egui::Ui, field_width: f32) -> bool {
+        let c = colors(ui);
         let icon = row_icon(
             ui,
             fonts::icons::USER,
@@ -160,7 +152,7 @@ impl App {
         let user_name = ui
             .add_sized(
                 [field_width, FIELD_HEIGHT],
-                text_field(&mut self.model.input.user_name, "User"),
+                text_field(&mut self.model.input.user_name, "User", c.text),
             )
             .labelled_by(icon.id);
         self.copy_requested |= submitted(&user_name);
@@ -184,6 +176,7 @@ impl App {
     /// The text edit only covers the left part of the field, so the toggle beside it gets its
     /// clicks; the field background and focus outline are painted across the whole width.
     fn show_secret_field(&mut self, ui: &mut egui::Ui, field_width: f32) -> egui::Response {
+        let c = colors(ui);
         // Clicks on the field's padding focus the text edit. Only `CLICK`, not `click()`: that
         // would also make the background focusable, an invisible extra stop for Tab.
         let (field, field_response) =
@@ -193,7 +186,7 @@ impl App {
 
         let secret = ui.put(
             text_rect,
-            text_field(&mut self.model.input.user_secret, "Secret")
+            text_field(&mut self.model.input.user_secret, "Secret", c.text)
                 .password(!self.show_secret)
                 // A custom frame replaces `margin`, so the padding goes on the frame.
                 .frame(egui::Frame::NONE.inner_margin(egui::Margin::symmetric(FIELD_PADDING, 0))),
@@ -227,7 +220,7 @@ impl App {
             let galley = ui.painter().layout_no_wrap(
                 identicon.to_string(),
                 egui::FontId::proportional(IDENTICON_SIZE),
-                theme::identicon_color(identicon.color),
+                c.identicon_color(identicon.color),
             );
             // Same height and spacing as the eye's highlight, so the two line up.
             let chip_size = egui::vec2(
@@ -241,7 +234,7 @@ impl App {
                 ),
                 chip_size,
             );
-            ui.painter().rect_filled(chip, HIGHLIGHT_RADIUS, CHIP_COLOR);
+            ui.painter().rect_filled(chip, HIGHLIGHT_RADIUS, c.chip);
             ui.painter()
                 .galley(chip.center() - galley.size() * 0.5, galley, Color32::WHITE);
             ui.interact(chip, ui.scope_id().with("identicon"), egui::Sense::hover())
@@ -269,6 +262,7 @@ impl App {
     }
 
     fn show_site_fields(&mut self, ui: &mut egui::Ui, field_width: f32) -> bool {
+        let c = colors(ui);
         let icon = row_icon(
             ui,
             fonts::icons::GLOBE,
@@ -278,7 +272,7 @@ impl App {
         let site_name = ui
             .add_sized(
                 [field_width, FIELD_HEIGHT],
-                text_field(&mut self.model.input.site_name, "Site"),
+                text_field(&mut self.model.input.site_name, "Site", c.text),
             )
             .labelled_by(icon.id);
         self.copy_requested |= submitted(&site_name);
@@ -313,16 +307,14 @@ impl App {
 
     /// A muted "⏎ copy" at the right end of the site field, unless the site name reaches it.
     fn show_enter_hint(&self, ui: &egui::Ui, field: &egui::Response) {
+        let c = colors(ui);
         let painter = ui.painter();
-        let glyph = painter.layout_no_wrap(
-            fonts::icons::RETURN.into(),
-            fonts::icon(ICON_SIZE),
-            ICON_COLOR,
-        );
+        let glyph =
+            painter.layout_no_wrap(fonts::icons::RETURN.into(), fonts::icon(ICON_SIZE), c.icon);
         let word = painter.layout_no_wrap(
             "copy".into(),
             egui::FontId::proportional(HINT_SIZE),
-            MUTED_TEXT_COLOR,
+            c.muted_text,
         );
         let gap = 4.0;
         let hint_width = glyph.size().x + gap + word.size().x;
@@ -330,7 +322,7 @@ impl App {
             .layout_no_wrap(
                 self.model.input.site_name.clone(),
                 egui::FontId::proportional(TEXT_SIZE),
-                TEXT_COLOR,
+                c.text,
             )
             .size()
             .x;
@@ -343,12 +335,12 @@ impl App {
         painter.galley(
             egui::pos2(right - word.size().x, center_y - word.size().y * 0.5),
             word,
-            MUTED_TEXT_COLOR,
+            c.muted_text,
         );
         painter.galley(
             egui::pos2(right - hint_width, center_y - glyph.size().y * 0.5),
             glyph,
-            ICON_COLOR,
+            c.icon,
         );
     }
 
@@ -366,6 +358,7 @@ impl App {
     }
 
     fn show_password(&mut self, ui: &mut egui::Ui) {
+        let c = colors(ui);
         ui.add_space(32.0);
 
         let password_text = self.password_text();
@@ -378,9 +371,9 @@ impl App {
             elapsed >= STALE_DIM_DELAY
         });
         let color = if self.model.site_password().is_some() && !stale {
-            PASSWORD_COLOR
+            c.password
         } else {
-            INACTIVE_PASSWORD_COLOR
+            c.inactive_password
         };
         // Shrink long passwords (Maximum is 20 characters) to fit the window width.
         let full_width = ui
@@ -418,7 +411,7 @@ impl App {
         self.show_copy_button(ui);
         ui.add_space(8.0);
         if let Some(hint) = self.clipboard_hint() {
-            ui.label(RichText::new(hint).size(HINT_SIZE).color(MUTED_TEXT_COLOR));
+            ui.label(RichText::new(hint).size(HINT_SIZE).color(c.muted_text));
         }
     }
 
@@ -437,21 +430,18 @@ impl App {
     }
 
     fn show_copy_button(&mut self, ui: &mut egui::Ui) {
+        let c = colors(ui);
         let has_password = self.model.site_password().is_some();
         let copied = self
             .copied_at
             .is_some_and(|at| at.elapsed() < COPIED_FEEDBACK);
         let (label, text_color, [fill, hover_fill, active_fill]) = if copied {
-            (
-                "Copied",
-                COPIED_TEXT_COLOR,
-                [COPIED_COLOR, COPIED_COLOR, COPIED_COLOR],
-            )
+            ("Copied", c.copied_text, [c.copied, c.copied, c.copied])
         } else {
             (
                 "Copy password",
-                ACCENT_TEXT_COLOR,
-                [ACCENT_COLOR, ACCENT_HOVER_COLOR, ACCENT_ACTIVE_COLOR],
+                c.accent_text,
+                [c.accent, c.accent_hover, c.accent_active],
             )
         };
         let copy_button = ui
@@ -511,5 +501,64 @@ impl App {
                 .is_some_and(|range| !range.is_empty())
         });
         !label_selected && !field_selected
+    }
+}
+
+/// The bottom row: the theme switch at the left, the version at the right.
+fn show_footer(ui: &mut egui::Ui) {
+    let content = ui.max_rect();
+    // The switch's highlight lines up with the panel's margins, not the area around it.
+    let switch = egui::Rect::from_min_size(
+        egui::pos2(
+            content.left() - HIGHLIGHT_INSET,
+            content.bottom() + HIGHLIGHT_INSET - THEME_BUTTON_SIZE,
+        ),
+        egui::Vec2::splat(THEME_BUTTON_SIZE),
+    );
+    show_theme_switch(ui, switch);
+
+    let row = content.with_min_y(switch.top()).with_max_y(switch.bottom());
+    ui.scope_builder(
+        egui::UiBuilder::new()
+            .max_rect(row)
+            .layout(egui::Layout::right_to_left(egui::Align::Center)),
+        |ui| {
+            ui.label(
+                RichText::new(format!("v{APP_VERSION}"))
+                    .size(HINT_SIZE - 1.0)
+                    .color(colors(ui).version),
+            )
+            .on_hover_text(APP_TITLE);
+        },
+    );
+}
+
+/// Cycles the theme between following the system, dark and light. The icon shows the current
+/// choice; egui remembers it across launches.
+fn show_theme_switch(ui: &mut egui::Ui, rect: egui::Rect) {
+    let ctx = ui.ctx().clone();
+    let current = ctx.options(|options| options.theme_preference);
+    let next = theme::next_preference(current);
+    let glyph = match current {
+        egui::ThemePreference::System => fonts::icons::CIRCLE_HALF,
+        egui::ThemePreference::Dark => fonts::icons::MOON,
+        egui::ThemePreference::Light => fonts::icons::SUN,
+    };
+    let label = format!(
+        "Theme: {}. Click for {}.",
+        theme::preference_name(current),
+        theme::preference_name(next)
+    );
+    let switch = icon_button(
+        ui,
+        rect,
+        "theme_switch",
+        glyph,
+        fonts::icon(ICON_SIZE),
+        &label,
+        true,
+    );
+    if switch.clicked() {
+        ctx.set_theme(next);
     }
 }

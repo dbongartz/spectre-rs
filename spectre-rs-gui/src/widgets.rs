@@ -5,30 +5,30 @@ use spectre_rs_core::PwType;
 
 use crate::fonts;
 use crate::theme::{
-    CONTROL_ACTIVE_COLOR, CONTROL_COLOR, CONTROL_HOVER_COLOR, CORNER_RADIUS, DISABLED_ICON_COLOR,
-    DIVIDER_COLOR, FIELD_HEIGHT, FIELD_PADDING, FOCUS_COLOR, HIGHLIGHT_INSET, HIGHLIGHT_RADIUS,
-    HINT_SIZE, ICON_COLOR, ICON_SIZE, MUTED_TEXT_COLOR, POPUP_ROW_HEIGHT, SELECTED_DETAIL_COLOR,
-    STEPPER_SEGMENT, TEXT_COLOR, TEXT_SIZE,
+    CORNER_RADIUS, FIELD_HEIGHT, FIELD_PADDING, HIGHLIGHT_INSET, HIGHLIGHT_RADIUS, HINT_SIZE,
+    ICON_SIZE, POPUP_ROW_HEIGHT, STEPPER_SEGMENT, TEXT_SIZE, colors,
 };
 
 /// The icon in front of a form row. Screen readers announce it as `name`, the row's label; the
 /// longer `hint` is its tooltip, so it never covers the field below the one being hovered.
 pub fn row_icon(ui: &mut egui::Ui, icon: &str, name: &str, hint: &str) -> egui::Response {
+    let c = colors(ui);
     let response = ui
         .label(
             RichText::new(icon)
                 .font(fonts::icon(ICON_SIZE))
-                .color(ICON_COLOR),
+                .color(c.icon),
         )
         .on_hover_text(hint);
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, name));
     response
 }
 
-pub fn text_field<'t>(text: &'t mut String, hint: &str) -> egui::TextEdit<'t> {
+/// A borderless single-line field; `color` is the theme's text color.
+pub fn text_field<'t>(text: &'t mut String, hint: &str, color: Color32) -> egui::TextEdit<'t> {
     egui::TextEdit::singleline(text)
         .font(egui::FontId::proportional(TEXT_SIZE))
-        .text_color(TEXT_COLOR)
+        .text_color(color)
         .margin(egui::Margin::symmetric(FIELD_PADDING, 0))
         .align(egui::Align2::LEFT_CENTER)
         .hint_text(hint)
@@ -57,6 +57,7 @@ pub fn password_type_selector(ui: &mut egui::Ui, pw_type: &mut PwType, width: f3
         .selected_text(RichText::new(format!("{pw_type:?}")).size(TEXT_SIZE))
         .width(width)
         .show_ui(ui, |ui| {
+            let c = colors(ui);
             // Compact rows, so all six types fit below the field without scrolling.
             ui.spacing_mut().interact_size.y = POPUP_ROW_HEIGHT;
             ui.spacing_mut().item_spacing.y = 2.0;
@@ -88,9 +89,9 @@ pub fn password_type_selector(ui: &mut egui::Ui, pw_type: &mut PwType, width: f3
                         detail,
                         egui::FontId::proportional(HINT_SIZE + 1.0),
                         if selected {
-                            SELECTED_DETAIL_COLOR
+                            c.selected_detail
                         } else {
-                            MUTED_TEXT_COLOR
+                            c.muted_text
                         },
                     );
                 }
@@ -124,22 +125,23 @@ pub fn icon_button(
         .on_hover_text(label);
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, label));
 
+    let c = colors(ui);
     let highlight = highlight_rect(rect);
     if enabled && (response.hovered() || response.has_focus()) {
         let fill = if response.is_pointer_button_down_on() {
-            CONTROL_ACTIVE_COLOR
+            c.control_active
         } else {
-            CONTROL_HOVER_COLOR
+            c.control_hover
         };
         ui.painter().rect_filled(highlight, HIGHLIGHT_RADIUS, fill);
     }
     focus_ring(ui, &response, highlight, HIGHLIGHT_RADIUS);
     let color = if !enabled {
-        DISABLED_ICON_COLOR
+        c.disabled_icon
     } else if response.hovered() {
-        TEXT_COLOR
+        c.text
     } else {
-        MUTED_TEXT_COLOR
+        c.muted_text
     };
     ui.painter().text(
         highlight.center(),
@@ -154,10 +156,11 @@ pub fn icon_button(
 /// A visible keyboard-focus indicator (WCAG 2.4.7) for widgets that have no outline of their own.
 pub fn focus_ring(ui: &egui::Ui, response: &egui::Response, rect: egui::Rect, radius: u8) {
     if response.has_focus() {
+        let c = colors(ui);
         ui.painter().rect_stroke(
             rect,
             radius,
-            egui::Stroke::new(2.0, FOCUS_COLOR),
+            egui::Stroke::new(2.0, c.focus),
             egui::StrokeKind::Inside,
         );
     }
@@ -172,8 +175,9 @@ fn highlight_rect(rect: egui::Rect) -> egui::Rect {
 
 /// A `[−] n [+]` stepper for the password counter; the number can also be dragged or typed.
 pub fn counter_stepper(ui: &mut egui::Ui, counter: &mut u32, width: f32) {
+    let c = colors(ui);
     let (rect, _) = ui.allocate_exact_size(egui::vec2(width, FIELD_HEIGHT), egui::Sense::hover());
-    ui.painter().rect_filled(rect, CORNER_RADIUS, CONTROL_COLOR);
+    ui.painter().rect_filled(rect, CORNER_RADIUS, c.control);
 
     let minus_rect = rect.with_max_x(rect.left() + STEPPER_SEGMENT);
     let plus_rect = rect.with_min_x(rect.right() - STEPPER_SEGMENT);
@@ -240,7 +244,7 @@ pub fn counter_stepper(ui: &mut egui::Ui, counter: &mut u32, width: f32) {
 
     // Dividers go on top so the hover fills of the segments don't cover them.
     let divider_y = egui::Rangef::new(rect.top() + 8.0, rect.bottom() - 8.0);
-    let divider = egui::Stroke::new(1.0, DIVIDER_COLOR);
+    let divider = egui::Stroke::new(1.0, c.divider);
     ui.painter().vline(minus_rect.right(), divider_y, divider);
     ui.painter().vline(plus_rect.left(), divider_y, divider);
 }
